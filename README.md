@@ -38,7 +38,7 @@ You want context-aware code review in your CI pipeline, IDE plugin, or internal 
 
 ### Prerequisites
 - Python 3.10+
-- [GitHub Personal Access Token](https://github.com/settings/tokens) — `repo` scope for private repos, `public_repo` for public only
+- [GitHub Personal Access Token](GUIDE_GITHUB_TOKEN.md) — `repo` scope for private repos, `public_repo` for public only
 - An LLM API key — multiple providers supported, see [Configuring Your LLM](#configuring-your-llm)
 
 ### Install
