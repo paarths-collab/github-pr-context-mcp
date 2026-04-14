@@ -1,6 +1,6 @@
 import argparse
-from github_graphql import fetch_prs
-from embeddings import index_prs, get_collection_stats
+from fetcher import fetch_prs
+from storage import index_prs, get_collection_stats
 
 def main():
     parser = argparse.ArgumentParser(description="Index a GitHub repo's PR history")

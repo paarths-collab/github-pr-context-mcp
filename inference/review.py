@@ -1,10 +1,8 @@
-import os
-from cerebras.cloud.sdk import Cerebras
-from dotenv import load_dotenv
+# LLM inference for code review — model-agnostic.
+# Uses inference/providers.py for the actual LLM call.
+# Swap providers by changing LLM_PROVIDER in .env, no code changes needed.
 
-load_dotenv()
-
-client = Cerebras(api_key=os.getenv("CEREBRAS_API_KEY"))
+from inference.providers import chat
 
 REVIEW_SYSTEM_PROMPT = """You are a senior software engineer doing code review.
 You have access to historical PR review comments from this repository.
@@ -12,15 +10,16 @@ Use the provided context to give reviews that match the team's standards and cat
 they've flagged before. Be specific, reference line numbers when possible, be concise.
 Do not be sycophantic. Flag real problems."""
 
+
 def review_with_context(
     diff_or_code: str,
     retrieved_context: list[dict],
     repo: str,
 ) -> str:
-    """Use retrieved RAG context + Cerebras to do a context-aware code review."""
+    """Use retrieved RAG context + LLM to do a context-aware code review."""
     context_text = "\n\n---\n".join([
         f"[Past review | similarity: {c['similarity']}]\n{c['text']}"
-        for c in retrieved_context[:6]  # Top 6 chunks to stay within context
+        for c in retrieved_context[:6]
     ])
 
     user_message = f"""Repository: {repo}
@@ -36,24 +35,18 @@ CODE TO REVIEW:
 Provide a thorough code review. Reference specific past patterns where relevant.
 Flag issues the team has flagged before. Note what looks good too."""
 
-    response = client.chat.completions.create(
-        model="llama3.1-8b",
+    return chat(
+        messages=[{"role": "user", "content": user_message}],
+        system=REVIEW_SYSTEM_PROMPT,
         max_tokens=1024,
-        messages=[
-            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
     )
 
-    return response.choices[0].message.content
 
 def summarize_patterns(retrieved_context: list[dict], repo: str) -> str:
     """Summarize what this team commonly flags in reviews."""
     context_text = "\n\n".join([c["text"] for c in retrieved_context])
 
-    response = client.chat.completions.create(
-        model="llama3.1-8b",
-        max_tokens=512,
+    return chat(
         messages=[{
             "role": "user",
             "content": (
@@ -63,6 +56,5 @@ def summarize_patterns(retrieved_context: list[dict], repo: str) -> str:
                 "Be specific. Quote examples where useful."
             ),
         }],
+        max_tokens=512,
     )
-
-    return response.choices[0].message.content
