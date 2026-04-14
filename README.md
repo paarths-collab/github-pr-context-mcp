@@ -329,32 +329,8 @@ github-pr-context-mcp/
 
 ---
 
-## Contributing
-
-These are real gaps — not fake beginner tickets.
-
-### Good First Issues
-
-- [ ] **Record the demo GIF** — 15s screen capture: index a repo → paste a diff → show the response
-- [ ] **Test Windsurf or OpenCode integration** — verify the config format and document any quirks
-- [ ] **Add `--since` flag to indexer** — only fetch PRs after a given date
-- [ ] **Add progress bar** — replace print statements in `indexer.py` with `tqdm`
-- [ ] **Write tests for `fetcher/transform.py`** — mock a GraphQL response, assert the flattened output
-
-### Bigger Contributions
-
-- [ ] **Incremental indexing** — only fetch new PRs on re-run
-- [ ] **File-aware retrieval** — when reviewing `auth/login.py`, prioritize past comments on the same file
-- [ ] **Webhook mode** — auto-index new PRs as they merge
-- [ ] **Streaming responses** — stream the review token-by-token
-
-### How to Contribute
-
-1. Fork the repo
-2. Pick an issue or open one describing what you want to build
-3. Open a PR — one thing per PR, keep it focused
-
 ---
+
 
 ## Roadmap
 
