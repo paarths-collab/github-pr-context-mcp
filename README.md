@@ -103,14 +103,16 @@ python indexer.py psf/black --pages 2
 
 Set `LLM_PROVIDER` and `LLM_MODEL` in your `.env`. No lock-in.
 
-| Provider | `LLM_PROVIDER` | Example `LLM_MODEL` | Free Tier |
+| Provider | `LLM_PROVIDER` | Example `LLM_MODEL` | Cost / Setup |
 |---|---|---|---|
-| **Cerebras** | `cerebras` | `llama3.1-8b` | ✅ [cloud.cerebras.ai](https://cloud.cerebras.ai) |
-| **Groq** | `groq` | `llama-3.1-8b-instant` | ✅ [console.groq.com](https://console.groq.com/keys) |
-| **Gemini** | `gemini` | `gemini-1.5-flash` | ✅ [aistudio.google.com](https://aistudio.google.com) |
-| **OpenAI** | `openai` | `gpt-4o-mini` | ❌ |
-| **Anthropic** | `anthropic` | `claude-3-5-haiku-20241022` | ❌ |
-| **Ollama** | `ollama` | `llama3.2` | ✅ fully local |
+| **Cerebras** | `cerebras` | `llama3.1-8b` | Free tier — [cloud.cerebras.ai](https://cloud.cerebras.ai) |
+| **Groq** | `groq` | `llama-3.3-70b-versatile` | Free tier — [console.groq.com](https://console.groq.com/keys) |
+| **Gemini** | `gemini` | `gemini-2.5-flash` | Free tier — [aistudio.google.com](https://aistudio.google.com) |
+| **OpenAI** | `openai` | `gpt-5` | Paid (Recommended for highest quality) |
+| **Anthropic** | `anthropic` | `claude-sonnet-4-6` | Paid (Recommended for highest quality) |
+| **Ollama** | `ollama` | `qwen2.5:7b` | 100% Free & Local |
+
+*(Tip: While free tiers are great for testing the waters, code review benefits massively from complex reasoning. If available, use a paid frontier model like Claude Sonnet 4.6 or GPT-5 for production use.)*
 
 Set your key as `LLM_API_KEY` in `.env` — works for any provider:
 
