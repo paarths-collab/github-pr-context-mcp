@@ -84,6 +84,7 @@ Pre-index before connecting to your AI tool:
 
 ```bash
 python indexer.py psf/black --pages 2
+# Or use full URLs: python indexer.py https://github.com/psf/black
 # --pages: 1-10, default 2. More pages = better context but slower.
 ```
 
@@ -92,7 +93,7 @@ python indexer.py psf/black --pages 2
 ```
 "Review this code using the psf/black repo's history"
 "What does the vercel/next.js team commonly flag in reviews?"
-"Switch to tiangolo/fastapi context"
+"Switch to https://github.com/tiangolo/fastapi context"
 "Find past review comments about error handling in my active repo"
 "List all repos I've indexed"
 ```

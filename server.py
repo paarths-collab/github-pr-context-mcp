@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
@@ -39,14 +40,25 @@ STORAGE_CONSEQUENCES = """
 """
 
 
+def _normalize_repo(repo_str: str) -> str:
+    if repo_str.endswith(".git"):
+        repo_str = repo_str[:-4]
+    match = re.search(r'(?:github\.com/)?([^/]+/[^/]+)', repo_str)
+    if not match:
+        raise ValueError(f"Invalid repo format: {repo_str}. Use owner/repo or a full GitHub URL.")
+    return match.group(1).split('#')[0].split('?')[0]
+
 def _resolve_repo(arguments: dict) -> str:
-    repo = arguments.get("repo") or _session["active_repo"]
-    if not repo:
+    repo = arguments.get("repo")
+    if repo:
+        return _normalize_repo(repo)
+    active = _session["active_repo"]
+    if not active:
         raise ValueError(
             "No repo specified and no active repo set. "
             "Use ensure_repo_ready first, or pass 'repo' explicitly."
         )
-    return repo
+    return active
 
 def _is_temporary(repo_key: str) -> bool:
     return _session["storage_types"].get(repo_key) == "temporary"
@@ -172,7 +184,10 @@ async def call_tool(name: str, arguments: dict):
 
     # ── ensure_repo_ready: the smart loader ──────────────────────────────
     if name == "ensure_repo_ready":
-        repo = arguments["repo"]
+        try:
+            repo = _normalize_repo(arguments["repo"])
+        except ValueError as e:
+            return [types.TextContent(type="text", text=f"❌ {e}")]
         storage = arguments.get("storage")
         pages = arguments.get("pages", 2)
 
@@ -242,7 +257,10 @@ async def call_tool(name: str, arguments: dict):
 
     # ── set_active_repo ───────────────────────────────────────────────────
     if name == "set_active_repo":
-        repo = arguments["repo"]
+        try:
+            repo = _normalize_repo(arguments["repo"])
+        except ValueError as e:
+            return [types.TextContent(type="text", text=f"❌ {e}")]
         if not repo_is_indexed_permanently(repo) and not repo_is_indexed_temporarily(repo):
             return [types.TextContent(type="text", text=(
                 f"❌ **{repo}** is not indexed yet. Use `ensure_repo_ready` first."
