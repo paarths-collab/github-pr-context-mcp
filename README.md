@@ -14,7 +14,7 @@ It indexes your repo's PR history and gives your AI coding tool the institutiona
 <!-- Upload as assets/demo.gif -->
 ![demo](assets/demo.gif)
 
-> "Review this diff using our team's review history" → finds past review comments, flags patterns your team has rejected before, responds in ~2 seconds.
+> "Review this diff using our team's review history" → finds past review comments, flags patterns your team has rejected before.
 
 ---
 
