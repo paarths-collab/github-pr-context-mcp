@@ -1,0 +1,5 @@
+{
+  "markdown.mermaid.enabled": true,
+  "markdown.experimental.mermaid": true,
+  "markdown.preview.security.level": "disable"
+}
