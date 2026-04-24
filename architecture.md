@@ -51,20 +51,20 @@ flowchart TB
     end
 
     subgraph Server["MCP Server"]
-        S["server.py - Tool Routing + Session State"]
-        F["fetcher - GitHub GraphQL Fetch"]
-        T["fetcher/transform.py - Normalize PR Data"]
-        D["storage/document_builder.py - Build Documents + Metadata"]
-        E["storage/encoder.py - SentenceTransformer"]
-        V["storage/vector_store.py - Chroma Query + Upsert"]
-        R["inference/review.py - Prompt Assembly"]
-        P["inference/providers.py - Provider Adapter"]
+        S["server.py"]
+        F["fetcher/client.py"]
+        T["fetcher/transform.py"]
+        D["storage/document_builder.py"]
+        E["storage/encoder.py"]
+        V["storage/vector_store.py"]
+        R["inference/review.py"]
+        P["inference/providers.py"]
     end
 
     subgraph External["External Services"]
         GH[(GitHub GraphQL API)]
         DB[(ChromaDB)]
-        LLM[(LLM Providers)]
+        LLM[(LLM APIs)]
     end
 
     U --> A --> S
@@ -74,6 +74,19 @@ flowchart TB
     S --> R --> P --> LLM
     R --> S --> A --> U
 ```
+
+### Component Legend
+
+| Node | Responsibility |
+|---|---|
+| `server.py` | MCP tool routing and session state management |
+| `fetcher/client.py` | GitHub GraphQL requests, pagination, and error handling |
+| `fetcher/transform.py` | Raw PR node flattening and normalization |
+| `storage/document_builder.py` | Converts PR data into searchable document records |
+| `storage/encoder.py` | Embedding generation for retrieval |
+| `storage/vector_store.py` | Chroma upsert/query and index stats |
+| `inference/review.py` | Context assembly and review prompt orchestration |
+| `inference/providers.py` | Multi-provider LLM adapter layer |
 
 ---
 
