@@ -3,6 +3,7 @@
 
 import requests
 import os
+import sys
 from dotenv import load_dotenv
 from fetcher.queries import PR_QUERY
 from fetcher.transform import flatten_prs
@@ -33,7 +34,8 @@ def _check_rate_limit(response: requests.Response) -> None:
         reset_at = response.headers.get("X-RateLimit-Reset", "unknown")
         print(
             f"⚠️  GitHub rate limit low: {remaining} points remaining. "
-            f"Resets at unix timestamp {reset_at}."
+            f"Resets at unix timestamp {reset_at}.",
+            file=sys.stderr
         )
 
 
@@ -103,7 +105,7 @@ def fetch_prs(owner: str, repo: str, pages: int = 2, github_token: str | None = 
     if pages < 1:
         raise ValueError("pages must be at least 1.")
     if pages > MAX_PAGES:
-        print(f"⚠️  pages capped at {MAX_PAGES} (requested {pages}).")
+        print(f"⚠️  pages capped at {MAX_PAGES} (requested {pages}).", file=sys.stderr)
         pages = MAX_PAGES
 
     all_prs = []
@@ -114,7 +116,7 @@ def fetch_prs(owner: str, repo: str, pages: int = 2, github_token: str | None = 
         if cursor:
             variables["cursor"] = cursor
 
-        print(f"  Fetching page {page_num}/{pages} for {owner}/{repo}...")
+        print(f"  Fetching page {page_num}/{pages} for {owner}/{repo}...", file=sys.stderr)
         data = run_query(PR_QUERY, variables, github_token=github_token)
         pr_data = data["data"]["repository"]["pullRequests"]
 

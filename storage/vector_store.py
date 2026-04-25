@@ -5,6 +5,7 @@ import chromadb
 import os
 import hashlib
 import re
+import sys
 from dotenv import load_dotenv
 from storage.encoder import encode
 from storage.document_builder import build_documents
@@ -148,7 +149,7 @@ def index_prs(
     label = "temporary (in-memory)" if temporary else "permanent (disk)"
     ns = _normalize_namespace(namespace)
     ns_suffix = f", namespace={ns}" if ns else ""
-    print(f"Indexed {len(docs)} documents for {repo_key} [{label}{ns_suffix}]")
+    print(f"Indexed {len(docs)} documents for {repo_key} [{label}{ns_suffix}]", file=sys.stderr)
     return len(docs)
 
 

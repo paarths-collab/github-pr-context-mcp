@@ -1,6 +1,8 @@
+import argparse
 import hashlib
 import os
 import platform
+import sys
 import threading
 
 
@@ -78,12 +80,68 @@ def _detect_mode() -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="GitHub PR Context MCP Server - Provides historical PR review context for code reviews.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Tools Overview:
+  - ensure_repo_ready: Prepares a repository for querying (indexes PRs).
+  - semantic_search_reviews: Search past review comments by meaning.
+  - review_code_with_history: Get a code review based on past team patterns.
+  - get_team_review_patterns: Identify recurring feedback in a repository.
+  - list_indexed_repos: See which repositories are already available.
+
+Configuration (Environment Variables):
+  - GITHUB_TOKEN: (Required) Personal Access Token with 'repo' scope.
+  - LLM_PROVIDER: (Optional) cerebras|openai|anthropic|gemini|ollama (default: cerebras).
+  - LLM_API_KEY: (Optional) API key for your chosen provider.
+  - CHROMA_PERSIST_DIR: (Optional) Custom path for persistent storage (default: ~/.github-pr-mcp/chroma_db).
+  - TELEMETRY: (Optional) set to 'false' to opt-out of anonymous usage pings.
+
+Important Concepts:
+  - Permanent Storage: Indexed data is saved to disk and persists across restarts.
+  - Temporary Storage: Indexed data is kept in memory and lost when the server stops.
+  - Namespace: Use namespaces to isolate indexed data between different teams or users.
+
+Example Usage (Claude Desktop Config):
+{
+  "mcpServers": {
+    "github-pr-context": {
+      "command": "github-pr-context-mcp",
+      "env": {
+        "GITHUB_TOKEN": "your_github_token_here",
+        "LLM_PROVIDER": "anthropic",
+        "LLM_API_KEY": "your_anthropic_key_here"
+      }
+    }
+  }
+}
+
+Path & Installation:
+  The executable is typically installed to your user's local bin directory.
+  - Windows: %USERPROFILE%\\.local\\bin\\github-pr-context-mcp.exe
+  - macOS/Linux: ~/.local/bin/github-pr-context-mcp
+  
+  If you are configuring Claude Desktop or another IDE, ensure you use the 
+  ABSOLUTE PATH to the executable to avoid "command not found" errors.
+
+Troubleshooting:
+  - "command not found": Use the absolute path (see above).
+  - "invalid character": Fixed! This server now uses stderr for logs.
+  - Rate limits: Ensure GITHUB_TOKEN is valid and has 'repo' scope.
+"""
+    )
+    # No actual arguments needed yet, but parser.parse_args() handles --help automatically
+    parser.parse_args()
+
     # Import here so that env vars from IDE env block are set before mcp_app loads
     from app.mcp_app import mcp
 
     mode = _detect_mode()
     # Send ping in background — startup is never delayed by telemetry
     threading.Thread(target=_send_startup_ping, args=(mode,), daemon=True).start()
+    
+    # Run the server
     mcp.run(transport="stdio")
 
 

@@ -2,6 +2,7 @@ import json
 import hmac
 import os
 import re
+import sys
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -494,9 +495,9 @@ def ensure_repo_ready(
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = storage
-            print(f"Background indexing finished for {repo_key}. {count} docs parsed.")
+            print(f"Background indexing finished for {repo_key}. {count} docs parsed.", file=sys.stderr)
         except Exception as e:
-            print(f"Background indexing failed for {repo_key}: {e}")
+            print(f"Background indexing failed for {repo_key}: {e}", file=sys.stderr)
 
     threading.Thread(target=_background_index, daemon=True).start()
 

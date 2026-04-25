@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import threading
 import requests
@@ -10,7 +11,7 @@ def _run_keep_alive():
         return
         
     url = f"{url.rstrip('/')}/healthz"
-    print(f"Keep-alive service started. Pinging {url} every 60s.")
+    print(f"Keep-alive service started. Pinging {url} every 60s.", file=sys.stderr)
     
     # Wait for server to boot
     time.sleep(10)
