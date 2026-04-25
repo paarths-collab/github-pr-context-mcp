@@ -24,8 +24,43 @@ Instead of generic feedback, reviews are informed by historical reviewer comment
 
 - Improves review consistency across teams and repositories.
 - Reduces repeated reviewer feedback on known issues.
-- Accelerates onboarding for new contributors.
 - Integrates with any MCP-compatible client and multiple LLM providers.
+
+---
+
+## 🛠️ Usage Modes: Solo vs. Team
+
+This MCP server is built to scale from a single machine to an entire engineering organization.
+
+### 👤 Solo Developer (Local Mode)
+**Best for:** Privacy, local-first control, and zero hosting costs.
+- **How it works:** Run via `uvx` or a local git clone.
+- **Storage:** ChromaDB stays on your local machine.
+- **Security:** Your GitHub Token and LLM keys never leave your device.
+- **Setup:** See [Quick Start](docs/quickstart.md#🚀-zero-setup-uvx--npx).
+
+### 🤝 Team Collaboration (Hosted Mode)
+**Best for:** Scaling team-wide PR standards and centralized infra.
+- **How it works:** One deployment on Render shared by the whole team.
+- **Isolation:** Strict **Gmail-based namespace isolation** (driven by SQLite). User A's indexed data is mathematically invisible to User B.
+- **Economics:** Pooled LLM credits and a single shared indexing server.
+- **Setup:** See [Deployment Guide](docs/integrations/deployed.md).
+
+---
+
+### 🌟 Zero-Friction Setup (Deployed Mode for End Users)
+If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` or install anything. You just drop a snippet into your IDE:
+
+```json
+"github-pr-context": {
+  "type": "sse",
+  "url": "https://YOUR-RENDER-URL.onrender.com/mcp",
+  "headers": {
+    "Authorization": "Bearer YOUR_TOKEN"
+  }
+}
+```
+*That's it.* If your IDE supports native MCP SSE connections, you are immediately connected to the secure Render deployment. No setup friction, no tools required.
 
 ---
 
@@ -50,28 +85,54 @@ Example workflow:
 - The server retrieves similar past review context.
 - The model returns grounded feedback aligned to team expectations.
 
+## Usage Analytics
+
+To help us understand adoption, the MCP server collects privacy-first, anonymous telemetry on deployments. Hosted deployments expose HTTP endpoints (`/stats` and `/ping`) that publicly display the **number of unique users across all three download sources** (`uvx`, `pipx`/local, and Render).
+
 ---
 
 ## Documentation
 
 Detailed guides are split into focused pages:
 
-- [Quick Start and Usage](quickstart.md)
-- [LLM Configuration](llm-configuration.md)
-- [Integrations](integrations.md)
-- [Architecture and Tools](architecture.md)
-- [Pipeline Deep Dive](pipeline.md)
-- [Roadmap](roadmap.md)
+- [Quick Start and Usage](docs/quickstart.md)
+- [LLM Configuration](docs/llm-configuration.md)
+- [Integrations](docs/integrations/index.md)
+- [Architecture and Tools](docs/architecture.md)
+- [Pipeline Deep Dive](docs/pipeline.md)
+- [Configuration Guide (Change Tokens/Settings)](docs/guides/configuration.md)
+- [Roadmap](docs/roadmap.md)
 
 ---
 
 ## Quick Links
 
-- Access setup: [GitHub Token Guide](GUIDE_GITHUB_TOKEN.md)
-- Client connection: [Integrations](integrations.md)
-- System internals: [Architecture and Tools](architecture.md)
-- Execution flows: [Pipeline Deep Dive](pipeline.md)
-- First run: [Quick Start and Usage](quickstart.md)
+- Access setup: [GitHub Token Guide](docs/GUIDE_GITHUB_TOKEN.md)
+- Client connection: [Integrations](docs/integrations/index.md)
+
+---
+
+## 📣 Community & Feedback
+
+We want to hear from you—whether you are a solo developer or a team at a large company!
+
+### 👤 For Individuals
+- **Feedback**: Please open an issue or start a discussion if you have ideas or encounter bugs.
+- **Show your support**: If this tool saves you time, give it a **Star ⭐**! It helps others find the project.
+
+### 🏢 For Corporate & Teams
+- **Usage**: Is your team using this MCP server? Join our "Adopters" list by opening a PR to add your team's name.
+- **Corporate Feedback**: Open an issue with the `corporate-usage` label to tell us how this has improved your PR review workflow.
+- **Custom Integration**: Need help deploying this to your private cloud? Reach out via GitHub Discussions.
+
+---
+
+## 📜 License
+
+This project is licensed under the **MIT License**. It is free to use, modify, and distribute for both personal and commercial purposes. See [LICENSE](LICENSE) for details.
+- System internals: [Architecture and Tools](docs/architecture.md)
+- Execution flows: [Pipeline Deep Dive](docs/pipeline.md)
+- First run: [Quick Start and Usage](docs/quickstart.md)
 
 ---
 

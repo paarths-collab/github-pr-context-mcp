@@ -5,3 +5,7 @@ __pycache__/
 chroma_db/
 .DS_Store
 mcp_config.json
+*.db
+*.db-*
+*.tmp
+/tests/__pycache__

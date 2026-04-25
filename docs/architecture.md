@@ -51,7 +51,9 @@ flowchart TB
     end
 
     subgraph Server["MCP Server"]
-        S["server.py"]
+        S["app/mcp_app.py"]
+        AU["auth/gmail_identity.py"]
+        AN["analytics/usage_metrics.py"]
         F["fetcher/client.py"]
         T["fetcher/transform.py"]
         D["storage/document_builder.py"]
@@ -68,6 +70,8 @@ flowchart TB
     end
 
     U --> A --> S
+    S --> AU
+    S --> AN
     S --> F --> GH
     F --> T --> D --> E --> V --> DB
     S --> V
@@ -79,7 +83,9 @@ flowchart TB
 
 | Node | Responsibility |
 |---|---|
-| `server.py` | MCP tool routing and session state management |
+| `app/mcp_app.py` | MCP tool routing, session state, background task orchestration |
+| `auth/gmail_identity.py` | Role-based Gmail identity & namespace isolation (SQLite) |
+| `analytics/usage_metrics.py` | Multi-source anonymous usage tracking (SQLite) |
 | `fetcher/client.py` | GitHub GraphQL requests, pagination, and error handling |
 | `fetcher/transform.py` | Raw PR node flattening and normalization |
 | `storage/document_builder.py` | Converts PR data into searchable document records |
@@ -107,17 +113,17 @@ sequenceDiagram
     C->>S: ensure_repo_ready(repo, storage, pages)
     S->>S: Check existing Permanent/Temporary index
     alt Not Indexed
-        S->>G: Fetch PR pages (30/page)
+        S-->>C: Start Background Indexing Thread & Return Immediately
+        S->>G: Background Thread: Fetch PR pages (30/page up to 100 max length)
         G-->>S: PR nodes + review threads + reviews + files
         S->>X: flatten_prs(nodes)
         X-->>S: normalized PR dictionaries
         S->>B: build_documents(prs)
-        B-->>S: docs, metadata, ids
+        B-->>S: docs, metadata (injecting namespace), ids
         S->>M: encode(doc) per document
         M-->>S: embeddings
-        S->>V: upsert(documents, embeddings, metadatas, ids)
+        S->>V: upsert(documents, embeddings, metadatas, ids) into isolated collection
     end
-    S-->>C: repo activated and ready
 ```
 
 ### Indexed Document Types
@@ -171,9 +177,10 @@ sequenceDiagram
 | Permanent | `chromadb.PersistentClient` | Yes | Repeatedly used repositories |
 | Temporary | `chromadb.EphemeralClient` | No | One-off exploration |
 
-### Collection Naming Strategy
+### Collection Naming Strategy & Data Isolation
 
 `owner/repo` is normalized to `owner--repo` to generate safe collection names.
+To support high-concurrency environments like Render safely without spawning hundreds of identical collections for different users, the architecture uses **single-collection metadata isolation**. The single `owner--repo` collection holds all chunks, but uses ChromaDB's `where={"namespace": <identity>}` clause alongside `metadata["namespace"]` tags to enforce completely mathematically isolated queries per user identity.
 
 ---
 
@@ -181,7 +188,7 @@ sequenceDiagram
 
 | Tool | Primary Purpose | Key Inputs | Typical Output |
 |---|---|---|---|
-| `ensure_repo_ready` | Auto-load or index a repository and activate session context | `repo`, optional `storage`, optional `pages` | Active repo state + indexing summary |
+| `ensure_repo_ready` | Auto-load or background-index a repository and activate session context | `repo`, optional `storage`, optional `pages` | Active repo state + indexing started status |
 | `set_active_repo` | Switch context to an already indexed repo | `repo` | Active repo switched confirmation |
 | `list_indexed_repos` | List all indexed repos (both storage modes) | none | Repo list + storage labels + doc counts |
 | `semantic_search_reviews` | Semantic retrieval over historical review artifacts | `query`, optional `repo`, optional `n_results` | Ranked context snippets |
@@ -195,15 +202,15 @@ sequenceDiagram
 ### `ensure_repo_ready`
 - Checks permanent first, temporary second.
 - If not found and `storage` missing, prompts user to choose permanent vs temporary.
-- If storage provided, fetches PRs and indexes immediately.
+- If storage provided, fetches PRs and indexes in a **background daemon thread** to prevent 60-second IDE LLM timeouts. It returns immediately asking the LLM to verify via `get_index_stats`.
 
 ### `review_code_with_history`
-- Retrieves similar historical comments.
+- Retrieves similar historical comments exactly filtered by `namespace` isolation.
 - Injects context into a review-focused system prompt.
 - Calls active LLM provider adapter.
 
 ### `semantic_search_reviews`
-- Returns metadata-rich snippets with similarity score.
+- Returns metadata-rich snippets with similarity score. Filtered strictly by IDOR-protected namespace.
 - Useful for manual inspection before invoking full review.
 
 </details>
@@ -214,21 +221,38 @@ sequenceDiagram
 
 ```text
 github-pr-context-mcp/
-├── server.py              # MCP server: tool definitions + session routing
-├── indexer.py             # CLI indexer for manual pre-fetch/index
+├── docs/
+│   ├── integrations/      # IDE setup guides
+│   ├── architecture.md    # System design and tools
+│   ├── pipeline.md        # Pipeline operational flows
+│   ├── quickstart.md      # Usage and storage guide
+│   ├── roadmap.md         # Future architectural debt
+│   └── GUIDE_GITHUB_TOKEN.md 
+├── scripts/
+│   ├── install_clients.py # Automated IDE configuration
+│   └── indexer.py         # CLI indexer for manual pre-fetch/index
+├── auth/
+│   └── gmail_identity.py  # User identity & SQLite auth store
+├── analytics/
+│   └── usage_metrics.py   # Anonymous usage tracking (SQLite)
+├── app/
+│   └── mcp_app.py         # MCP tool logic & background tasks
+├── entrypoints/
+│   ├── local/
+│   │   └── server.py      # Local stdio launcher
+│   └── deployed/
+│       └── server.py      # Render SSE bridge
 ├── fetcher/
-│   ├── client.py          # GraphQL client, pagination, errors
-│   ├── queries.py         # GraphQL query strings
-│   └── transform.py       # Raw node -> normalized PR shape
+│   ├── client.py          # GitHub GraphQL logic
+│   └── transform.py       # PR data normalization
 ├── storage/
-│   ├── encoder.py         # SentenceTransformer embedding
-│   ├── document_builder.py# Build text docs/metadata/ids
-│   └── vector_store.py    # Chroma indexing/query/stats
+│   ├── vector_store.py    # ChromaDB & namespace isolation
+│   └── encoder.py         # Embedding generation
 └── inference/
-    ├── providers.py       # Unified multi-provider chat adapter
-    └── review.py          # Prompt assembly + review/pattern summarization
+    ├── providers.py       # Multi-LLM provider handling
+    └── review.py          # RAG-based review orchestration
 ```
 
 ---
 
-Back to [README](README.md)
+Back to [README](../README.md)

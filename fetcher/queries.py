@@ -22,7 +22,7 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
         mergedAt
         additions
         deletions
-        files(first: 20) {
+        files(first: 100) {
           nodes {
             path
             additions
@@ -30,12 +30,12 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
             changeType
           }
         }
-        reviewThreads(first: 50) {
+        reviewThreads(first: 100) {
           nodes {
             isResolved
             path
             line
-            comments(first: 10) {
+            comments(first: 50) {
               nodes {
                 author { login }
                 body
@@ -44,7 +44,7 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
             }
           }
         }
-        reviews(first: 20) {
+        reviews(first: 50) {
           nodes {
             author { login }
             state

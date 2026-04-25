@@ -1,0 +1,38 @@
+[project]
+name = "github-pr-context-mcp"
+version = "0.1.0"
+description = "GitHub PR Review Context MCP Server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp",
+    "chromadb",
+    "sentence-transformers",
+    "python-dotenv",
+    "requests",
+    "cerebras-cloud-sdk",
+    "openai",
+    "anthropic",
+    "google-generativeai"
+]
+
+[project.scripts]
+github-pr-context-mcp = "entrypoints.local.server:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Explicitly discover all packages so uvx/pipx installs from git work correctly.
+# Without this, setuptools may miss subpackages like app, auth, storage, etc.
+where = ["."]  # search from repo root
+include = [
+    "app*",
+    "auth*",
+    "analytics*",
+    "storage*",
+    "inference*",
+    "fetcher*",
+    "entrypoints*",
+]

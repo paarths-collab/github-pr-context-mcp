@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: github-pr-context-mcp
+    env: python
+    plan: starter          # free plan has no persistent disk; upgrade to starter for /var/data
+    buildCommand: pip install -r requirements.txt
+    startCommand: python entrypoints/deployed/server.py
+    disk:
+      name: mcp-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: MCP_TRANSPORT
+        value: streamable-http
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: AUTH_REGISTRY_PATH
+        value: /var/data/auth_registry.json
+      - key: USAGE_TRACKING_ENABLED
+        value: "true"
+      - key: USAGE_STATS_PATH
+        value: /var/data/usage_stats.json
+      # ── Secrets: set these in Render Dashboard → Environment ──────────────────
+      # MCP_PUBLIC_URL       → https://YOUR-SERVICE.onrender.com   (no trailing slash)
+      # REGISTRATION_SECRET  → a strong random string (openssl rand -base64 32)
+      # GITHUB_TOKEN         → your GitHub PAT with repo scope
+      # LLM_PROVIDER         → cerebras | openai | anthropic | gemini | groq
+      # LLM_MODEL            → e.g. llama3.1-8b
+      # LLM_API_KEY          → your LLM provider API key
+      # KEEP_ALIVE_URL       → e.g. https://github-pr-context-mcp.onrender.com
+      # GITHUB_TRAFFIC_REPO  → e.g. paarths-collab/github-pr-context-mcp
+      # USAGE_METRICS_TOKEN  → optional: protects the /usage admin endpoint

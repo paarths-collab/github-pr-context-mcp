@@ -61,3 +61,7 @@ GITHUB_TOKEN=github_pat_11A...
 
 > [!CAUTION]
 > **Never commit your token to a public repository.** Ensure your `.env` file is listed in `.gitignore` (we've handled this for you by default).
+
+---
+
+Back to [README](../README.md)

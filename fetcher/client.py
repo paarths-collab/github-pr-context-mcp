@@ -13,8 +13,8 @@ GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 MAX_PAGES = 10  # Hard cap to prevent accidental runaway fetches
 
 
-def _headers() -> dict:
-    token = os.getenv("GITHUB_TOKEN")
+def _headers(github_token: str | None = None) -> dict:
+    token = (github_token or "").strip() or os.getenv("GITHUB_TOKEN")
     if not token:
         raise EnvironmentError(
             "GITHUB_TOKEN is not set. Add it to your .env file.\n"
@@ -37,13 +37,13 @@ def _check_rate_limit(response: requests.Response) -> None:
         )
 
 
-def run_query(query: str, variables: dict) -> dict:
+def run_query(query: str, variables: dict, github_token: str | None = None) -> dict:
     """Execute a raw GraphQL query against the GitHub API."""
     try:
         resp = requests.post(
             GITHUB_GRAPHQL_URL,
             json={"query": query, "variables": variables},
-            headers=_headers(),
+            headers=_headers(github_token=github_token),
             timeout=30,
         )
     except requests.exceptions.ConnectionError:
@@ -87,7 +87,7 @@ def run_query(query: str, variables: dict) -> dict:
     return data
 
 
-def fetch_prs(owner: str, repo: str, pages: int = 2) -> list[dict]:
+def fetch_prs(owner: str, repo: str, pages: int = 2, github_token: str | None = None) -> list[dict]:
     """
     Fetch up to pages*30 merged/closed PRs with all review context.
 
@@ -115,7 +115,7 @@ def fetch_prs(owner: str, repo: str, pages: int = 2) -> list[dict]:
             variables["cursor"] = cursor
 
         print(f"  Fetching page {page_num}/{pages} for {owner}/{repo}...")
-        data = run_query(PR_QUERY, variables)
+        data = run_query(PR_QUERY, variables, github_token=github_token)
         pr_data = data["data"]["repository"]["pullRequests"]
 
         batch = flatten_prs(pr_data["nodes"])

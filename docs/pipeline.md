@@ -65,17 +65,18 @@ sequenceDiagram
     alt Already Indexed
         S-->>C: activate existing repo context
     else Not Indexed
-        S->>G: fetch PR pages (last 30 per page)
-        G-->>S: PR nodes + review threads + reviews
-        S->>T: flatten_prs(nodes)
-        T-->>S: normalized PR objects
-        S->>B: build_documents(prs)
-        B-->>S: docs + metadata + ids
-        S->>E: encode each doc
-        E-->>S: embeddings
-        S->>D: upsert documents and vectors
-        D-->>S: index complete
-        S-->>C: repo ready
+        S-->>C: acknowledge and start background thread
+        loop Background Process
+            S->>G: fetch PR pages (up to 100 max fidelity)
+            G-->>S: PR nodes + review threads + reviews
+            S->>T: flatten_prs(nodes)
+            T-->>S: normalized PR objects
+            S->>B: build_documents(prs)
+            B-->>S: docs + metadata (namespace isolated)
+            S->>E: encode each doc
+            E-->>S: embeddings
+            S->>D: upsert into owner--repo collection
+        end
     end
 ```
 
@@ -108,4 +109,4 @@ flowchart TD
 
 ---
 
-Back to [README](README.md)
+Back to [README](../README.md)

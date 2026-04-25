@@ -9,6 +9,8 @@
 
 Set `LLM_PROVIDER` and `LLM_MODEL` in `.env`. The provider layer is unified, so you can switch vendors without touching application code.
 
+If Cerebras returns a quota or rate-limit error, the app now surfaces the reset time when it is available and tells you how long to wait before trying again.
+
 ---
 
 ## Provider Matrix
@@ -47,6 +49,14 @@ LLM_API_KEY=your_key_here
 Fallback behavior:
 - If a provider-specific key is missing, the server falls back to `LLM_API_KEY`.
 
+## Hosted deployments
+
+In Render or any other shared deployed setup, `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, and `GITHUB_TOKEN` are deployment-owned environment variables.
+
+- End users can change their own MCP auth token.
+- End users cannot swap the LLM provider or model from their client config unless you build a separate settings endpoint.
+- End users cannot replace the GitHub token in the hosted service; that token belongs to the deployment and is what the server uses to fetch PR data.
+
 ### Ollama note
 
 Set `LLM_BASE_URL` only when needed:
@@ -69,4 +79,4 @@ LLM_BASE_URL=http://localhost:11434/v1
 
 ---
 
-Back to [README](README.md)
+Back to [README](../README.md)

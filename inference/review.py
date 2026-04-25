@@ -15,6 +15,7 @@ def review_with_context(
     diff_or_code: str,
     retrieved_context: list[dict],
     repo: str,
+    settings: dict | None = None,
 ) -> str:
     """Use retrieved RAG context + LLM to do a context-aware code review."""
     context_text = "\n\n---\n".join([
@@ -39,10 +40,11 @@ Flag issues the team has flagged before. Note what looks good too."""
         messages=[{"role": "user", "content": user_message}],
         system=REVIEW_SYSTEM_PROMPT,
         max_tokens=1024,
+        settings=settings,
     )
 
 
-def summarize_patterns(retrieved_context: list[dict], repo: str) -> str:
+def summarize_patterns(retrieved_context: list[dict], repo: str, settings: dict | None = None) -> str:
     """Summarize what this team commonly flags in reviews."""
     context_text = "\n\n".join([c["text"] for c in retrieved_context])
 
@@ -57,4 +59,5 @@ def summarize_patterns(retrieved_context: list[dict], repo: str) -> str:
             ),
         }],
         max_tokens=512,
+        settings=settings,
     )
