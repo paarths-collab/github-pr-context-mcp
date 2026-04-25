@@ -90,13 +90,26 @@ def _current_user_email() -> str | None:
     return None
 
 
-def _current_user_settings() -> dict[str, str]:
-    if _identity_store is None:
+def _current_user_settings() -> dict:
+    store = _identity_store
+    if not store:
         return {}
     email = _current_user_email()
     if not email:
         return {}
-    return _identity_store.get_user_settings(email)
+    return store.get_user_settings(email)
+
+def _normalize_repo(repo: str | None) -> str:
+    """Strict validation for GitHub repository identifiers (owner/name)."""
+    if not repo:
+        raise ValueError("Repository identifier is required (e.g. 'owner/repo').")
+    
+    # Must match standard GitHub format and be alphanumeric/dash/underscore
+    # Prevents directory traversal like ../../ etc.
+    if not re.fullmatch(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+        raise ValueError(f"Invalid repository format: '{repo}'. Expected 'owner/repo'.")
+    
+    return repo
 
 
 def _llm_settings(user_settings: dict[str, str]) -> dict[str, str]:
@@ -153,7 +166,7 @@ def _resolve_repo(repo: str | None, state: dict) -> str:
     active = state.get("active_repo")
     if not active:
         raise ValueError("No repo specified and no active repo set. Use ensure_repo_ready first, or pass repo explicitly.")
-    return active
+    return _normalize_repo(active)
 
 
 def _is_temporary(repo_key: str, namespace: str | None, state: dict) -> bool:
@@ -307,6 +320,24 @@ async def usage(request: Request) -> Response:
         days = 30
 
     return JSONResponse(_usage_store.summary(last_days=days))
+
+
+@mcp.custom_route("/usage/badge", methods=["GET"], include_in_schema=False)
+async def usage_badge(_: Request) -> Response:
+    """Returns a Shields.io compliant JSON for a live user counter badge."""
+    if _usage_store is None:
+         return JSONResponse({"schemaVersion": 1, "label": "users", "message": "off", "color": "grey"})
+
+    stats = _usage_store.summary(last_days=1)
+    count = stats.get("total_unique_users", 0)
+    
+    return JSONResponse({
+        "schemaVersion": 1,
+        "label": "users",
+        "message": str(count),
+        "color": "blueviolet" if count > 0 else "grey",
+        "style": "flat-square"
+    })
 
 
 @mcp.custom_route("/register", methods=["POST"], include_in_schema=False)

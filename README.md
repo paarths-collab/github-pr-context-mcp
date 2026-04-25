@@ -8,6 +8,7 @@
 ![Vector Store](https://img.shields.io/badge/Storage-ChromaDB-orange)
 ![Inference](https://img.shields.io/badge/LLM-Multi--Provider-brightgreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Users](https://img.shields.io/endpoint?url=https://YOUR_RENDER_URL.onrender.com/usage/badge)
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 
