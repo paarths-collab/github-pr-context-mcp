@@ -8,12 +8,12 @@
 ![Vector Store](https://img.shields.io/badge/Storage-ChromaDB-orange)
 ![Inference](https://img.shields.io/badge/LLM-Multi--Provider-brightgreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Users](https://img.shields.io/endpoint?url=https://YOUR_RENDER_URL.onrender.com/usage/badge)
+![Status](https://img.shields.io/badge/Render%20Hosting-Upcoming-gray)
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 
 
-> Tracking unique users across **uvx**, **pipx**, **local**, and **Render** sources.
+> Tracking unique users across **uvx**, **pipx**, and **local** sources. (Render hosting upcoming)
 
 </div>
 
@@ -44,16 +44,16 @@ This MCP server is built to scale from a single machine to an entire engineering
 - **Security:** Your GitHub Token and LLM keys never leave your device.
 - **Setup:** See [Quick Start](docs/quickstart.md#🚀-zero-setup-uvx--pipx--npx).
 
-### 🤝 Team Collaboration (Hosted Mode)
+### 🤝 Team Collaboration (Hosted Mode - UPCOMING)
 **Best for:** Scaling team-wide PR standards and centralized infra.
-- **How it works:** One deployment on Render shared by the whole team.
+- **How it works:** One deployment on Render (Coming Soon) shared by the whole team.
 - **Isolation:** Strict **Gmail-based namespace isolation** (driven by SQLite). User A's indexed data is mathematically invisible to User B.
 - **Economics:** Pooled LLM credits and a single shared indexing server.
 - **Setup:** See [Deployment Guide](docs/integrations/deployed.md).
 
 ---
 
-### 🌟 Zero-Friction Setup (Deployed Mode for End Users)
+### 🌟 Zero-Friction Setup (Upcoming)
 If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` or install anything. You just drop a snippet into your IDE:
 
 ```json
@@ -93,7 +93,7 @@ Example workflow:
 
 ## Usage Analytics
 
-To help us understand adoption, the MCP server collects privacy-first, anonymous telemetry on deployments. Hosted deployments expose HTTP endpoints (`/stats` and `/ping`) that publicly display the **number of unique users across all three download sources** (`uvx`, `pipx`/local, and Render).
+To help us understand adoption, the MCP server collects privacy-first, anonymous telemetry on deployments. Future hosted deployments will expose HTTP endpoints (`/stats` and `/ping`) that publicly display the **number of unique users**.
 
 ---
 

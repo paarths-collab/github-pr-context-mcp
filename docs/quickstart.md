@@ -7,7 +7,7 @@
 - [GitHub Personal Access Token](GUIDE_GITHUB_TOKEN.md) — `repo` scope for private repos, `public_repo` for public only
 - An LLM API key — multiple providers supported, see [LLM Configuration](llm-configuration.md)
 
-If you deploy on Render, users must register a Gmail address once and use the returned bearer token. See [Gmail-only auth](docs/integrations/auth.md).
+Render hosting is **UPCOMING**. Once available, users will register a Gmail address once and use a bearer token.
 
 ---
 
