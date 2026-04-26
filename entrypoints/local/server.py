@@ -213,14 +213,23 @@ Troubleshooting (JSON for AI Agents):
 
     if args.command == "config":
         import json
-        # Detect absolute path
-        # On Windows, if installed via pipx, sys.argv[0] is the .exe
+        import sys
+        
+        # Detect absolute path of the current binary/script
         abs_path = os.path.abspath(sys.argv[0])
+        command_val = abs_path
+        
+        # If running from source (.py file), prefix with python
+        if abs_path.endswith(".py"):
+            python_exe = sys.executable
+            command_val = f"{python_exe} {abs_path}"
+        
+        detected_os = platform.system()
         
         config = {
             "mcpServers": {
                 "github-pr-context": {
-                    "command": abs_path,
+                    "command": command_val,
                     "env": {
                         "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN",
                         "LLM_PROVIDER": "cerebras",
@@ -229,7 +238,8 @@ Troubleshooting (JSON for AI Agents):
                 }
             }
         }
-        print("\n=== CLAUDE DESKTOP / CURSOR CONFIG SNIPPET ===", file=sys.stderr)
+        print(f"\n=== {detected_os.upper()} CONFIG SNIPPET ===", file=sys.stderr)
+        print(f"Detected binary at: {command_val}", file=sys.stderr)
         print("Copy the JSON below into your mcpConfig.json file:", file=sys.stderr)
         print(json.dumps(config, indent=2))
         print("\nNOTE: Ensure you replace YOUR_GITHUB_TOKEN and YOUR_LLM_API_KEY.\n", file=sys.stderr)
