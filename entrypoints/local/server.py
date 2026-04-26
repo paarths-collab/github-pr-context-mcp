@@ -130,6 +130,31 @@ Troubleshooting:
   - "command not found": Use the absolute path (see above).
   - "invalid character": Fixed! This server now uses stderr for logs.
   - Rate limits: Ensure GITHUB_TOKEN is valid and has 'repo' scope.
+  - Windows [WinError 32] (PermissionError):
+      This happens when trying to 'pipx upgrade' while the server is running.
+      1. Close MCP clients (Cursor, Claude Desktop).
+      2. Run: taskkill /F /IM github-pr-context-mcp.exe
+      3. Retry: pipx upgrade github-pr-context-mcp
+
+Troubleshooting (JSON for AI Agents):
+  ```json
+  {
+    "errors": {
+      "WinError 32": {
+        "cause": "Process lock. Binary is currently running/locked by Windows.",
+        "remediation": [
+          "taskkill /F /IM github-pr-context-mcp.exe",
+          "Close IDEs (Cursor/Claude Desktop)",
+          "Retry pipx upgrade"
+        ]
+      },
+      "JSONDecodeError": {
+        "cause": "Stdout pollution from print statements.",
+        "fix": "Use sys.stderr for all logs/status updates."
+      }
+    }
+  }
+  ```
 """
     )
     # No actual arguments needed yet, but parser.parse_args() handles --help automatically
