@@ -65,7 +65,7 @@ Authenticated users can store their **own** keys inside the server. These keys s
 | **uvx / pipx / npx** | **Installation** | Downloads the code and makes the server available on your machine. |
 | **install_clients.py** | **Configuration** | Updates your `claude_desktop_config.json` or IDE settings with the correct paths. |
 
-> **Note on Tracking**: Both methods are tracked. `uvx` users are counted separately from people who manually configured their environment via `install_clients.py`.
+> **Note on Tracking**: All local methods are tracked. `uvx` and `pipx` users are counted separately from people who manually configured their environment via `install_clients.py`.
 
 ---
 

@@ -18,7 +18,7 @@ If you want a shared hosted service, use the deployed mode plus Gmail-only auth.
 ## 🕹️ Choosing your mode
 
 ### 1. Solo Developer (Local)
-Recommended if you are an individual developer or working on highly sensitive local code. The server runs as a child process of your IDE.
+Recommended if you are an individual developer or working on highly sensitive local code. The server runs as a child process of your IDE via `uvx`, `pipx`, or a local installation.
 
 - [Local Setup Guide](local.md)
 

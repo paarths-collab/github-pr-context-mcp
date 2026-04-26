@@ -1,3 +1,21 @@
+Metadata-Version: 2.4
+Name: github-pr-context-mcp
+Version: 0.1.0
+Summary: GitHub PR Review Context MCP Server
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: mcp
+Requires-Dist: chromadb
+Requires-Dist: sentence-transformers
+Requires-Dist: python-dotenv
+Requires-Dist: requests
+Requires-Dist: cerebras-cloud-sdk
+Requires-Dist: openai
+Requires-Dist: anthropic
+Requires-Dist: google-generativeai
+Dynamic: license-file
+
 # GitHub PR Review Context MCP
 
 <div align="center">
@@ -39,10 +57,10 @@ This MCP server is built to scale from a single machine to an entire engineering
 
 ### 👤 Solo Developer (Local Mode)
 **Best for:** Privacy, local-first control, and zero hosting costs.
-- **How it works:** Run via `uvx`, `pipx`, or a local git clone.
+- **How it works:** Run via `uvx` or a local git clone.
 - **Storage:** ChromaDB stays on your local machine.
 - **Security:** Your GitHub Token and LLM keys never leave your device.
-- **Setup:** See [Quick Start](docs/quickstart.md#🚀-zero-setup-uvx--pipx--npx).
+- **Setup:** See [Quick Start](docs/quickstart.md#🚀-zero-setup-uvx--npx).
 
 ### 🤝 Team Collaboration (Hosted Mode)
 **Best for:** Scaling team-wide PR standards and centralized infra.

@@ -51,9 +51,22 @@ Create `.cursor/mcp.json` or `%APPDATA%\\Cursor\\mcp.json`:
 }
 ```
 
-## Other clients
+## 📦 Running via pipx
+If you installed via `pipx install github-pr-context-mcp`, your configuration is much simpler. Just use the command name directly:
 
-Use the same stdio server path with the client's wrapper key:
+```json
+"github-pr-context": {
+  "command": "github-pr-context-mcp",
+  "env": {
+    "GITHUB_TOKEN": "ghp_your_token",
+    "LLM_PROVIDER": "anthropic",
+    "LLM_API_KEY": "sk-ant-..."
+  }
+}
+```
+
+## Other clients
+Use the same stdio server path or command name with the client's wrapper key:
 
 - Antigravity: `mcpServers`
 - Claude Desktop: `mcpServers`

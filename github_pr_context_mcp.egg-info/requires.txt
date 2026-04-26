@@ -1,0 +1,9 @@
+mcp
+chromadb
+sentence-transformers
+python-dotenv
+requests
+cerebras-cloud-sdk
+openai
+anthropic
+google-generativeai

@@ -13,12 +13,19 @@ If you deploy on Render, users must register a Gmail address once and use the re
 
 ## Installation & setup
 
-### 🚀 Zero-Setup (uvx / npx)
+### 🚀 Zero-Setup (uvx / pipx / npx)
 The fastest way to use the server without even downloading the code. Just run one of these commands directly in your IDE's MCP environment:
 
 **Using uvx (Recommended):**
 ```bash
 uvx github-pr-context-mcp
+```
+
+**Using pipx (Recommended for global install):**
+```bash
+pipx run github-pr-context-mcp
+# To install permanently as a global command:
+pipx install github-pr-context-mcp
 ```
 
 **Using npx (Smithery bridge):**
@@ -35,15 +42,15 @@ python scripts/install_clients.py
 > [!TIP]
 > Run this inside your virtual environment (`.venv`). It detects your IDE and bakes in absolute paths for you.
 
-### 📦 Portable PIP Install
-You can install this server as a global command on your system:
+### 📦 Manual PIP Install
+If you prefer standard pip:
 
 ```bash
 pip install github-pr-context-mcp
 # or from this directory
 pip install -e .
 ```
-Once installed, you can simply use the command `github-pr-context-mcp` in any terminal or IDE config.
+Once installed, you can use the command `github-pr-context-mcp` in any terminal or IDE config.
 
 ### 🛠️ Manual Integration
 If you prefer managing the lifecycle yourself:
