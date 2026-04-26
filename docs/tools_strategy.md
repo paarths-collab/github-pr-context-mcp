@@ -18,6 +18,30 @@ This guide helps both humans and AI agents understand which tool to use for diff
 
 ---
 
+## 🤖 AI Agent Strategy (JSON)
+
+Agents can parse this structured guide to make autonomous tool-calling decisions:
+
+```json
+{
+  "strategy": {
+    "onboarding": "ensure_repo_ready",
+    "fact_finding": "semantic_search_reviews",
+    "code_authoring": "generate_code_from_history",
+    "reviewing": "review_code_with_history",
+    "pattern_discovery": "get_team_review_patterns"
+  },
+  "triggers": {
+    "repo_not_indexed": "ensure_repo_ready",
+    "feature_request": "generate_code_from_history",
+    "bug_report": "semantic_search_reviews",
+    "pr_review_request": "review_code_with_history"
+  }
+}
+```
+
+---
+
 ## 🚀 Resolving Installation Path Issues
 
 A common problem in MCP setups is the "command not found" error because IDEs (Claude Desktop, Cursor) need the **absolute path** to the binary.

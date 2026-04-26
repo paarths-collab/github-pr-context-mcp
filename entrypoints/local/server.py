@@ -161,6 +161,25 @@ Tool Selection & Strategy (When to use what):
   - Code Review: Use `review_code_with_history` before submitting a PR to catch issues early.
   - Analysis: Use `get_team_review_patterns` to understand the team's "soul" and recurring feedback themes.
 
+Tool Selection Strategy (JSON for AI Agents):
+  ```json
+  {
+    "strategy": {
+      "onboarding": "ensure_repo_ready",
+      "fact_finding": "semantic_search_reviews",
+      "code_authoring": "generate_code_from_history",
+      "pre_flight_check": "review_code_with_history",
+      "culture_mapping": "get_team_review_patterns"
+    },
+    "decision_tree": {
+      "if_new_repo": "ensure_repo_ready",
+      "if_writing_code": "generate_code_from_history",
+      "if_debugging": "semantic_search_reviews",
+      "if_checking_standards": "get_team_review_patterns"
+    }
+  }
+  ```
+
 Troubleshooting:
   - "command not found": Use the absolute path. Run `github-pr-context-mcp config` to get it.
   - "invalid character": Fixed! This server now uses stderr for logs.
