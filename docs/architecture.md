@@ -193,6 +193,8 @@ To support high-concurrency environments like Render safely without spawning hun
 | `list_indexed_repos` | List all indexed repos (both storage modes) | none | Repo list + storage labels + doc counts |
 | `semantic_search_reviews` | Semantic retrieval over historical review artifacts | `query`, optional `repo`, optional `n_results` | Ranked context snippets |
 | `review_code_with_history` | Generate review using retrieved team history | `code`, optional `repo` | Grounded code review text |
+| `generate_code_from_history` | Generate new code grounded in team history | `task`, optional `repo` | Grounded code generation |
+
 | `get_team_review_patterns` | Summarize recurring review patterns | optional `repo`, optional `topic` | Pattern summary |
 | `get_index_stats` | Show indexed document count for a repo | optional `repo` | Stats JSON |
 

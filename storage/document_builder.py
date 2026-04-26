@@ -25,12 +25,14 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
             })
             ids.append(f"pr-{pr_num}-desc")
 
-        # Inline review comments
+        # Inline review comments + code context
         for i, comment in enumerate(pr["review_comments"]):
             if not comment["body"].strip():
                 continue
+            
+            diff_text = f"\nCode Context:\n{comment['diff_hunk']}" if comment.get("diff_hunk") else ""
             docs.append(
-                f"PR #{pr_num} | File: {comment['file']} | Line: {comment['line']}\n"
+                f"PR #{pr_num} | File: {comment['file']} | Line: {comment['line']}{diff_text}\n"
                 f"Reviewer ({comment['author']}): {comment['body']}"
             )
             metadatas.append({
@@ -41,6 +43,17 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "resolved": comment["resolved"],
             })
             ids.append(f"pr-{pr_num}-comment-{i}")
+
+        # Commit messages
+        for i, commit in enumerate(pr.get("commits", [])):
+            if not commit["message"].strip():
+                continue
+            docs.append(f"PR #{pr_num} Commit: {commit['message']}")
+            metadatas.append({
+                "type": "commit_message",
+                "pr_number": pr_num,
+            })
+            ids.append(f"pr-{pr_num}-commit-{i}")
 
         # Overall review summaries (only those with written body)
         for i, review in enumerate(pr["reviews"]):

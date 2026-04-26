@@ -9,3 +9,8 @@ mcp_config.json
 *.db-*
 *.tmp
 /tests/__pycache__
+
+build/
+dist/
+*.egg-info/
+.pytest_cache/

@@ -88,6 +88,7 @@ python scripts/indexer.py psf/black --pages 2
 
 ```
 "Review this code using the psf/black repo's history"
+"Generate a new error handler for my fastmcp app using the tiangolo/fastapi history"
 "What does the vercel/next.js team commonly flag in reviews?"
 "Switch to https://github.com/tiangolo/fastapi context"
 "Find past review comments about error handling in my active repo"

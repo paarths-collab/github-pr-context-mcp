@@ -88,6 +88,7 @@ Tools Overview:
   - ensure_repo_ready: Prepares a repository for querying (indexes PRs).
   - semantic_search_reviews: Search past review comments by meaning.
   - review_code_with_history: Get a code review based on past team patterns.
+  - generate_code_from_history: Generate new code grounded in team history.
   - get_team_review_patterns: Identify recurring feedback in a repository.
   - list_indexed_repos: See which repositories are already available.
 

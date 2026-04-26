@@ -75,6 +75,7 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 |---|---|
 | Historical review retrieval | Semantic search across prior PR comments and review summaries |
 | Context-aware AI review | Feedback grounded in repository-specific review behavior |
+| Grounded code generation | Generate new code based on past commits, comments, and style |
 | Smart repository readiness | Auto-detect indexed state and index on demand |
 | Flexible storage modes | Permanent (disk) and temporary (in-memory) indexing options |
 | Portable inference layer | Switch LLM providers using environment configuration only |

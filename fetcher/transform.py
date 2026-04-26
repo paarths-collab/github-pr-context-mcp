@@ -13,6 +13,7 @@ def flatten_pr(raw_pr: dict) -> dict:
                 "author": comment["author"]["login"] if comment["author"] else "ghost",
                 "body": comment["body"],
                 "created_at": comment["createdAt"],
+                "diff_hunk": thread.get("diffHunk", ""),
             })
 
     return {
@@ -34,6 +35,10 @@ def flatten_pr(raw_pr: dict) -> dict:
             for f in raw_pr["files"]["nodes"]
         ],
         "review_comments": review_comments,
+        "commits": [
+            {"message": c["commit"]["message"]}
+            for c in raw_pr["commits"]["nodes"]
+        ],
         "reviews": [
             {
                 "author": r["author"]["login"] if r["author"] else "ghost",

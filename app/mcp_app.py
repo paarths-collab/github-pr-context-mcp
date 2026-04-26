@@ -19,7 +19,7 @@ import time
 from auth import GmailIdentityStore, GmailTokenVerifier
 from analytics import UsageMetricsStore
 from fetcher import fetch_prs
-from inference import review_with_context, summarize_patterns
+from inference import review_with_context, summarize_patterns, generate_with_context
 from storage import (
     delete_repo_index as delete_repo_index_storage,
     get_collection_stats,
@@ -666,6 +666,35 @@ def review_code_with_history(
         namespace=namespace,
     )
     return review_with_context(code, context, repo_key, settings=_llm_settings(user_settings))
+
+
+@mcp.tool(name="generate_code_from_history")
+def generate_code_from_history(
+    task: str,
+    repo: str | None = None,
+    namespace: str | None = None,
+    ctx: Context | None = None,
+) -> str:
+    """Generate code grounded in historical PR patterns and review feedback."""
+    if ctx is None:
+        raise ValueError("Context is required")
+
+    state = _state(ctx)
+    namespace = _resolve_namespace(namespace, state)
+    _track_usage(ctx, namespace, "generate_code_from_history")
+    repo_key = _resolve_repo(repo, state)
+    temporary = _is_temporary(repo_key, namespace, state)
+
+    user_settings = _current_user_settings()
+    # Search for relevant context (commits, comments, hunks)
+    context = query_similar(
+        repo_key,
+        task,
+        n_results=12,
+        temporary=temporary,
+        namespace=namespace,
+    )
+    return generate_with_context(task, context, repo_key, settings=_llm_settings(user_settings))
 
 
 @mcp.tool(name="get_team_review_patterns")

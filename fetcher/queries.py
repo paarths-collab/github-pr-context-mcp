@@ -35,12 +35,20 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
             isResolved
             path
             line
+            diffHunk
             comments(first: 50) {
               nodes {
                 author { login }
                 body
                 createdAt
               }
+            }
+          }
+        }
+        commits(first: 10) {
+          nodes {
+            commit {
+              message
             }
           }
         }
