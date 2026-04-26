@@ -93,7 +93,23 @@ python scripts/indexer.py psf/black --pages 2
 "Switch to https://github.com/tiangolo/fastapi context"
 "Find past review comments about error handling in my active repo"
 "List all repos I've indexed"
+"Create a .cursorrules file for this repository using its history"
 ```
+
+---
+
+## 🧠 Institutional Memory (New)
+
+The biggest bottleneck in AI coding is the agent "forgetting" your team's unsaid rules (e.g., "always use early returns," "avoid magic strings").
+
+Instead of re-analyzing history on every task, you can **bake the team's brain** into your IDE:
+
+1.  **Generate the rules:**
+    `"Generate a .cursorrules file for this repo"`
+2.  **The file is saved:** A `.cursorrules` (or `CLAUDE.md`) is written to your project root.
+3.  **Automatic Enforcement:** Any future `generate_code_from_history` call will automatically detect this file and use it as hard constraints.
+
+This makes your AI agent behave like a senior engineer who has been at the company for years.
 
 ---
 

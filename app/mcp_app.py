@@ -19,7 +19,7 @@ import time
 from auth import GmailIdentityStore, GmailTokenVerifier
 from analytics import UsageMetricsStore
 from fetcher import fetch_prs
-from inference import review_with_context, summarize_patterns, generate_with_context
+from inference import review_with_context, summarize_patterns, generate_with_context, generate_rules_content
 from storage import (
     delete_repo_index as delete_repo_index_storage,
     get_collection_stats,
@@ -673,9 +673,23 @@ def generate_code_from_history(
     task: str,
     repo: str | None = None,
     namespace: str | None = None,
+    rules_file: str | None = None,
     ctx: Context | None = None,
 ) -> str:
-    """Generate code grounded in historical PR patterns and review feedback."""
+    """Generate code grounded in historical PR patterns and review feedback.
+
+    Automatically loads team rules from a local .cursorrules / CLAUDE.md /
+    .github/copilot-instructions.md file if present, injecting them as hard
+    constraints so generated code already follows the team's standards.
+
+    Args:
+        task: What to implement or build.
+        repo: GitHub repo to use. Defaults to the active repo.
+        namespace: Storage namespace override.
+        rules_file: Path to a rules file to load. If omitted, the tool auto-detects
+                    .cursorrules, CLAUDE.md, or .github/copilot-instructions.md in
+                    the current working directory.
+    """
     if ctx is None:
         raise ValueError("Context is required")
 
@@ -685,8 +699,30 @@ def generate_code_from_history(
     repo_key = _resolve_repo(repo, state)
     temporary = _is_temporary(repo_key, namespace, state)
 
+    # --- Auto-load repo rules file ---
+    import pathlib
+    repo_rules: str | None = None
+    rules_source: str | None = None
+
+    if rules_file:
+        candidate = pathlib.Path(rules_file)
+        if candidate.exists():
+            repo_rules = candidate.read_text(encoding="utf-8", errors="replace")
+            rules_source = str(candidate)
+    else:
+        # Auto-detect standard rules file locations in priority order
+        for candidate_name in (
+            ".cursorrules",
+            "CLAUDE.md",
+            ".github/copilot-instructions.md",
+        ):
+            candidate = pathlib.Path(candidate_name)
+            if candidate.exists():
+                repo_rules = candidate.read_text(encoding="utf-8", errors="replace")
+                rules_source = str(candidate)
+                break
+
     user_settings = _current_user_settings()
-    # Search for relevant context (commits, comments, hunks)
     context = query_similar(
         repo_key,
         task,
@@ -694,7 +730,22 @@ def generate_code_from_history(
         temporary=temporary,
         namespace=namespace,
     )
-    return generate_with_context(task, context, repo_key, settings=_llm_settings(user_settings))
+    result = generate_with_context(
+        task, context, repo_key,
+        settings=_llm_settings(user_settings),
+        repo_rules=repo_rules,
+    )
+
+    if rules_source:
+        result = f"📋 Rules applied from: {rules_source}\n\n{result}"
+    else:
+        result = (
+            "ℹ️  No rules file found (.cursorrules / CLAUDE.md). "
+            "Run generate_repo_rules to create one.\n\n"
+            + result
+        )
+
+    return result
 
 
 @mcp.tool(name="get_team_review_patterns")
@@ -793,3 +844,73 @@ def get_usage_stats(days: int = 30, admin_token: str | None = None) -> str:
 
     days = max(1, min(days, 365))
     return json.dumps(_usage_store.summary(last_days=days), indent=2)
+
+
+@mcp.tool(name="generate_repo_rules")
+def generate_repo_rules(
+    output_path: str = ".cursorrules",
+    repo: str | None = None,
+    namespace: str | None = None,
+    ctx: Context | None = None,
+) -> str:
+    """Generate a .cursorrules / CLAUDE.md / copilot-instructions.md file grounded in this repo's PR history.
+
+    The generated file pre-loads all team coding standards into any IDE agent (Cursor, Claude,
+    GitHub Copilot) so it does not need to re-analyse the PR history on every session.
+
+    Args:
+        output_path: Where to write the rules file. Defaults to '.cursorrules'.
+                     Use 'CLAUDE.md' for Claude agents or '.github/copilot-instructions.md'
+                     for GitHub Copilot.
+        repo: GitHub repo to use. Defaults to the active repo.
+        namespace: Storage namespace override.
+    """
+    if ctx is None:
+        raise ValueError("Context is required")
+
+    state = _state(ctx)
+    namespace = _resolve_namespace(namespace, state)
+    _track_usage(ctx, namespace, "generate_repo_rules")
+    repo_key = _resolve_repo(repo, state)
+    temporary = _is_temporary(repo_key, namespace, state)
+
+    user_settings = _current_user_settings()
+    # Pull broad context: patterns, commits, review comments
+    context = query_similar(
+        repo_key,
+        "code quality architecture testing documentation style conventions",
+        n_results=25,
+        temporary=temporary,
+        namespace=namespace,
+    )
+
+    rules_content = generate_rules_content(context, repo_key, settings=_llm_settings(user_settings))
+
+    # Sanitise output_path: allow only relative paths, no traversal
+    import pathlib
+    safe_path = pathlib.Path(output_path)
+    if safe_path.is_absolute() or ".." in safe_path.parts:
+        return (
+            "Error: output_path must be a relative path (e.g. '.cursorrules', 'CLAUDE.md').\n"
+            "Absolute paths and directory traversal are not allowed.\n\n"
+            "Here is the generated content for you to save manually:\n\n"
+            + rules_content
+        )
+
+    try:
+        safe_path.parent.mkdir(parents=True, exist_ok=True)
+        safe_path.write_text(rules_content, encoding="utf-8")
+        return (
+            f"✅ Rules file written to: {safe_path}\n"
+            f"Repo: {repo_key} | {len(context)} context documents used.\n\n"
+            f"Load this file into your IDE agent to pre-feed team coding standards.\n"
+            f"Regenerate any time by calling generate_repo_rules again.\n\n"
+            f"--- Preview (first 500 chars) ---\n"
+            + rules_content[:500] + "..."
+        )
+    except OSError as e:
+        return (
+            f"Could not write to '{output_path}': {e}\n\n"
+            "Here is the generated content for you to save manually:\n\n"
+            + rules_content
+        )

@@ -162,21 +162,32 @@ Tool Selection & Strategy (When to use what):
   - Analysis: Use `get_team_review_patterns` to understand the team's "soul" and recurring feedback themes.
 
 Tool Selection Strategy (JSON for AI Agents):
+  Load the block below at the START of every session. Match the user task to a trigger -> call that tool.
+  Full reference: https://github.com/paarths-collab/github-pr-context-mcp/blob/main/docs/tools_strategy.md
+
   ```json
   {
-    "strategy": {
-      "onboarding": "ensure_repo_ready",
-      "fact_finding": "semantic_search_reviews",
-      "code_authoring": "generate_code_from_history",
-      "pre_flight_check": "review_code_with_history",
-      "culture_mapping": "get_team_review_patterns"
+    "tools": {
+      "ensure_repo_ready":       { "call_when": "session start / new repo / repo changed" },
+      "set_active_repo":         { "call_when": "user says switch/use a different repo" },
+      "list_indexed_repos":      { "call_when": "user asks what repos are indexed" },
+      "delete_repo_index":       { "call_when": "user wants to remove/reset index" },
+      "semantic_search_reviews": { "call_when": "user asks technical question / wants past examples" },
+      "review_code_with_history":{ "call_when": "user pastes code and asks for review" },
+      "generate_code_from_history":{"call_when": "user asks to write/implement/generate code" },
+      "get_team_review_patterns":{ "call_when": "user wants team norms / onboarding / standards" },
+      "get_index_stats":         { "call_when": "verify index is complete / how many docs" },
+      "update_settings":         { "call_when": "change token or LLM key (hosted mode only)" },
+      "get_usage_stats":         { "call_when": "admin asks for adoption metrics" },
+      "generate_repo_rules":     { "call_when": "user wants .cursorrules / CLAUDE.md / copilot-instructions.md from repo history" }
     },
-    "decision_tree": {
-      "if_new_repo": "ensure_repo_ready",
-      "if_writing_code": "generate_code_from_history",
-      "if_debugging": "semantic_search_reviews",
-      "if_checking_standards": "get_team_review_patterns"
-    }
+    "session_flow": [
+      "1. ensure_repo_ready",
+      "2. get_team_review_patterns (optional)",
+      "2b. generate_repo_rules (optional — writes rules file once for future sessions)",
+      "3. semantic_search_reviews | generate_code_from_history | review_code_with_history",
+      "4. get_index_stats (optional)"
+    ]
   }
   ```
 

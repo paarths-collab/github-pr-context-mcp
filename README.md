@@ -76,6 +76,7 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 | Historical review retrieval | Semantic search across prior PR comments and review summaries |
 | Context-aware AI review | Feedback grounded in repository-specific review behavior |
 | Grounded code generation | Generate new code based on past commits, comments, and style |
+| **Team rules generation** | **Auto-generate .cursorrules / CLAUDE.md from repo history** |
 | Smart repository readiness | Auto-detect indexed state and index on demand |
 | Flexible storage modes | Permanent (disk) and temporary (in-memory) indexing options |
 | Portable inference layer | Switch LLM providers using environment configuration only |
@@ -94,6 +95,27 @@ Example workflow:
 ## Usage Analytics
 
 To help us understand adoption, the MCP server collects privacy-first, anonymous telemetry on deployments. Future hosted deployments will expose HTTP endpoints (`/stats` and `/ping`) that publicly display the **number of unique users**.
+
+---
+
+## 🧰 Core Tools Reference
+
+The server exposes 12 core tools for IDE agents and developers. For a deep dive on when to use each, see the [**Tool Strategy Guide**](docs/tools_strategy.md).
+
+| Tool | Action |
+|---|---|
+| `ensure_repo_ready` | Index a repo and ensure it's ready for queries |
+| `generate_repo_rules` | **Synthesize .cursorrules / CLAUDE.md from PR history** |
+| `generate_code_from_history`| Write code grounded in past commits & team style |
+| `review_code_with_history` | Perform AI review grounded in team review memory |
+| `get_team_review_patterns` | Summarize recurring team standards (e.g. "no magic numbers") |
+| `semantic_search_reviews` | Search past PR comments by meaning, not just keywords |
+| `set_active_repo` | Switch between multiple indexed repositories |
+| `list_indexed_repos` | View all repos currently in local/temporary storage |
+| `delete_repo_index` | Free up disk space by clearing repository indices |
+| `get_index_stats` | Verify if a repo index is complete (doc count) |
+| `update_settings` | Update tokens/LLM keys (Hosted mode only) |
+| `get_usage_stats` | View adoption metrics and unique user counts |
 
 ---
 
