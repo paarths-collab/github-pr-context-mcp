@@ -54,6 +54,34 @@ def _send_startup_ping(mode: str) -> None:
         pass  # Never surface telemetry errors to the user
 
 
+def _check_for_updates() -> None:
+    """Check if a newer version is available on GitHub and notify via stderr.
+    This check is non-blocking and runs in a daemon thread.
+    """
+    try:
+        from importlib.metadata import version
+        import requests
+        import re
+
+        current_version = version("github-pr-context-mcp")
+        # Check raw pyproject.toml on main branch for the latest version
+        # This is faster and more reliable than the GitHub releases API for development versions
+        url = "https://raw.githubusercontent.com/paarths-collab/github-pr-context-mcp/main/pyproject.toml"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            match = re.search(r'version\s*=\s*"([^"]+)"', response.text)
+            if match:
+                latest_version = match.group(1)
+                if latest_version != current_version:
+                    print(
+                        f"\n[UPDATE AVAILABLE] A new version of github-pr-context-mcp is available: {latest_version} (Current: {current_version})\n"
+                        f"Run: pipx upgrade github-pr-context-mcp\n",
+                        file=sys.stderr
+                    )
+    except Exception:
+        pass  # Never block startup if network or version lookup fails
+
+
 def _detect_mode() -> str:
     """Detect how this server was launched.
 
@@ -166,6 +194,8 @@ Troubleshooting (JSON for AI Agents):
     mode = _detect_mode()
     # Send ping in background — startup is never delayed by telemetry
     threading.Thread(target=_send_startup_ping, args=(mode,), daemon=True).start()
+    # Check for updates in background
+    threading.Thread(target=_check_for_updates, daemon=True).start()
     
     # Run the server
     mcp.run(transport="stdio")
