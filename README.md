@@ -133,16 +133,19 @@ We want to hear from you—whether you are a solo developer or a team at a large
 
 ---
 
-## 📜 License
+## 📜 Documentation & Guides
 
-This project is licensed under the **MIT License**. It is free to use, modify, and distribute for both personal and commercial purposes. See [LICENSE](LICENSE) for details.
-- System internals: [Architecture and Tools](docs/architecture.md)
-- Execution flows: [Pipeline Deep Dive](docs/pipeline.md)
-- First run: [Quick Start and Usage](docs/quickstart.md)
+- **Strategy & Best Practices**: [Tool Strategy & Selection Guide](docs/tools_strategy.md)
+- **Architecture**: [Architecture and Tools](docs/architecture.md)
+- **Pipeline**: [Pipeline Deep Dive](docs/pipeline.md)
+- **Usage**: [Quick Start and Usage](docs/quickstart.md)
 
----
+## 🛠️ Troubleshooting
 
+- **"command not found"**: Use absolute paths in your configuration. Run `github-pr-context-mcp config` to get your exact path.
+- **"PermissionError: [WinError 32]"**: The binary is locked by a running process. Close Claude/Cursor, run `taskkill /F /IM github-pr-context-mcp.exe`, then retry the upgrade.
+- **Rate Limit Errors**: Ensure your `GITHUB_TOKEN` is valid and has `repo` scope.
 
-## License
+## ⚖️ License
 
 MIT

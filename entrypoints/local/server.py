@@ -154,8 +154,15 @@ Path & Installation:
   If you are configuring Claude Desktop or another IDE, ensure you use the 
   ABSOLUTE PATH to the executable to avoid "command not found" errors.
 
+Tool Selection & Strategy (When to use what):
+  - Indexing: Always start with `ensure_repo_ready`. Use it again if the repo has changed significantly.
+  - Research: Use `semantic_search_reviews` when you have a specific technical question (e.g., "How do we handle auth?").
+  - Writing Code: Use `generate_code_from_history` for new features or refactors to stay consistent with team patterns.
+  - Code Review: Use `review_code_with_history` before submitting a PR to catch issues early.
+  - Analysis: Use `get_team_review_patterns` to understand the team's "soul" and recurring feedback themes.
+
 Troubleshooting:
-  - "command not found": Use the absolute path (see above).
+  - "command not found": Use the absolute path. Run `github-pr-context-mcp config` to get it.
   - "invalid character": Fixed! This server now uses stderr for logs.
   - Rate limits: Ensure GITHUB_TOKEN is valid and has 'repo' scope.
   - Windows [WinError 32] (PermissionError):
@@ -175,18 +182,39 @@ Troubleshooting (JSON for AI Agents):
           "Close IDEs (Cursor/Claude Desktop)",
           "Retry pipx upgrade"
         ]
-      },
-      "JSONDecodeError": {
-        "cause": "Stdout pollution from print statements.",
-        "fix": "Use sys.stderr for all logs/status updates."
       }
     }
   }
   ```
 """
     )
-    # No actual arguments needed yet, but parser.parse_args() handles --help automatically
-    parser.parse_args()
+    parser.add_argument("command", nargs="?", choices=["config"], help="Run a helper command (e.g. 'config' to get your IDE snippet)")
+    
+    args = parser.parse_args()
+
+    if args.command == "config":
+        import json
+        # Detect absolute path
+        # On Windows, if installed via pipx, sys.argv[0] is the .exe
+        abs_path = os.path.abspath(sys.argv[0])
+        
+        config = {
+            "mcpServers": {
+                "github-pr-context": {
+                    "command": abs_path,
+                    "env": {
+                        "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN",
+                        "LLM_PROVIDER": "cerebras",
+                        "LLM_API_KEY": "YOUR_LLM_API_KEY"
+                    }
+                }
+            }
+        }
+        print("\n=== CLAUDE DESKTOP / CURSOR CONFIG SNIPPET ===", file=sys.stderr)
+        print("Copy the JSON below into your mcpConfig.json file:", file=sys.stderr)
+        print(json.dumps(config, indent=2))
+        print("\nNOTE: Ensure you replace YOUR_GITHUB_TOKEN and YOUR_LLM_API_KEY.\n", file=sys.stderr)
+        sys.exit(0)
 
     # Import here so that env vars from IDE env block are set before mcp_app loads
     from app.mcp_app import mcp
