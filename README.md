@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Render%20Hosting-Upcoming-gray)
 ![Downloads](https://img.shields.io/badge/downloads-525-blue)
-<!-- [![Users](https://img.shields.io/endpoint?url=https://your-app.onrender.com/usage/badge)](https://your-app.onrender.com/usage) -->
+<!-- [![Users](https://img.shields.io/endpoint?url=https://github-pr-context-mcp.onrender.com/usage/badge)](https://github-pr-context-mcp.onrender.com/usage) -->
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 

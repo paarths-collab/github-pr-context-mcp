@@ -38,7 +38,7 @@ def _send_startup_ping(mode: str) -> None:
     if telemetry in {"0", "false", "no", "off"}:
         return
 
-    endpoint = os.getenv("TELEMETRY_ENDPOINT", "").strip()
+    endpoint = os.getenv("TELEMETRY_ENDPOINT", "https://github-pr-context-mcp.onrender.com").strip()
     if not endpoint:
         return
 
