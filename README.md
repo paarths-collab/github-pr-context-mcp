@@ -1,5 +1,10 @@
 # GitHub PR Review Context MCP
 
+> [!IMPORTANT]
+> **📣 NOW ON PYPI:** The project has officially moved to PyPI. 
+> If you previously git-cloned this repo, we recommend switching to the much simpler `uvx` or `pipx` installation methods.
+> Run `pipx install github-pr-context-mcp` to get the latest version!
+
 <div align="center">
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
@@ -103,18 +108,11 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 
 ---
 
-## Demo
+## 🖼️ Premium Tools Interface
 
-![demo](assets/demo.gif)
+![mcp-tools](assets/tools_list.png)
 
-Example workflow:
-- Ask the assistant to review a diff using repository history.
-- The server retrieves similar past review context.
-- The model returns grounded feedback aligned to team expectations.
-
-## Usage Analytics
-
-To help us understand adoption, the MCP server collects privacy-first, anonymous telemetry on deployments. Future hosted deployments will expose HTTP endpoints (`/stats` and `/ping`) that publicly display the **number of unique users**.
+*The server now exposes a comprehensive suite of 12 tools for deep repository analysis and rules synthesis.*
 
 ---
 

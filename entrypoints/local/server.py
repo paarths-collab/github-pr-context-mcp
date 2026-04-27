@@ -266,6 +266,14 @@ Troubleshooting (JSON for AI Agents):
     threading.Thread(target=_check_for_updates, daemon=True).start()
     
     # Run the server
+    if mode == "local":
+        print(
+            "\n[ANNOUNCEMENT] github-pr-context-mcp is now available on PyPI!\n"
+            "We recommend switching to the official package for seamless updates:\n"
+            "Run: pipx install github-pr-context-mcp\n",
+            file=sys.stderr
+        )
+
     mcp.run(transport="stdio")
 
 
