@@ -178,7 +178,13 @@ class UsageMetricsStore:
         return {
             "tracked_since": tracked_since_val,
             "total_tool_calls": total_calls_val,
-            "total_unique_users": total_unique,
+            "metrics": {
+                "total_unique_users": total_unique,
+                "active_cli_users": total_ping_users,
+                "authenticated_users": total_auth_users,
+                "github_clones": github_clones_val,
+                "github_downloads": github_downloads_val
+            },
             "users_by_mode": users_by_mode,
             "top_tools": top_tools,
             "daily": daily_series,

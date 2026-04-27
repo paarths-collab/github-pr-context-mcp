@@ -11,6 +11,7 @@
 ![Status](https://img.shields.io/badge/Render%20Hosting-Upcoming-gray)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/github-pr-context-mcp)
 ![Downloads](https://img.shields.io/badge/downloads-525-blue)
+<!-- [![Users](https://img.shields.io/endpoint?url=https://your-app.onrender.com/usage/badge)](https://your-app.onrender.com/usage) -->
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 
