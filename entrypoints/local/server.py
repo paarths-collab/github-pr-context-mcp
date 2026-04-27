@@ -31,11 +31,11 @@ def _machine_fingerprint() -> str:
 
 def _send_startup_ping(mode: str) -> None:
     """Fire-and-forget anonymous ping to the Render server for user counting.
-    Only sends if TELEMETRY_ENDPOINT is configured. Opt-out via TELEMETRY=false.
+    Only sends if TELEMETRY_ENDPOINT is configured. Defaults to opt-in via TELEMETRY=true.
     Never blocks startup — runs in a daemon thread.
     """
-    telemetry = os.getenv("TELEMETRY", "true").strip().lower()
-    if telemetry in {"0", "false", "no", "off"}:
+    telemetry = os.getenv("TELEMETRY", "false").strip().lower()
+    if telemetry not in {"1", "true", "yes", "on"}:
         return
 
     endpoint = os.getenv("TELEMETRY_ENDPOINT", "").strip()

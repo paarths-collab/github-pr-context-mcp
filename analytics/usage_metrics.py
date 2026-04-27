@@ -81,6 +81,13 @@ class UsageMetricsStore:
                     PRIMARY KEY (mode, user_hash)
                 )
             ''')
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS github_daily_clones (
+                    timestamp TEXT PRIMARY KEY,
+                    count INTEGER DEFAULT 0,
+                    uniques INTEGER DEFAULT 0
+                )
+            ''')
 
     def _hash_user(self, user_id: str) -> str:
         return hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
@@ -106,10 +113,24 @@ class UsageMetricsStore:
         with self._get_conn() as conn:
             conn.execute("INSERT INTO pings (mode, user_hash, first_seen, last_seen, count) VALUES (?, ?, ?, ?, 1) ON CONFLICT(mode, user_hash) DO UPDATE SET last_seen = ?, count = count + 1", (safe_mode, user_hash, now_str, now_str, now_str))
 
-    def update_github_clones(self, count: int) -> None:
-        """Update the persistent record of unique github clones fetched from the traffic API."""
+    def update_github_clones(self, clones_data: list[dict]) -> None:
+        """Update the persistent record of daily github clones fetched from the traffic API."""
         with self._get_conn() as conn:
-            conn.execute("INSERT INTO global_stats (key, value) VALUES ('github_clones', ?) ON CONFLICT(key) DO UPDATE SET value = ?", (count, count))
+            for day in clones_data:
+                ts = day.get("timestamp")
+                count = day.get("count", 0)
+                uniques = day.get("uniques", 0)
+                if ts:
+                    conn.execute(
+                        "INSERT INTO github_daily_clones (timestamp, count, uniques) VALUES (?, ?, ?) "
+                        "ON CONFLICT(timestamp) DO UPDATE SET count = MAX(count, ?), uniques = MAX(uniques, ?)",
+                        (ts, count, uniques, count, uniques)
+                    )
+
+    def update_github_downloads(self, count: int) -> None:
+        """Update the persistent record of GitHub release downloads."""
+        with self._get_conn() as conn:
+            conn.execute("INSERT INTO global_stats (key, value) VALUES ('github_downloads', ?) ON CONFLICT(key) DO UPDATE SET value = ?", (count, count))
 
     def summary(self, last_days: int = 30) -> dict[str, Any]:
         last_days = max(1, min(last_days, 365))
@@ -145,11 +166,14 @@ class UsageMetricsStore:
             if "render" not in users_by_mode or users_by_mode["render"] < total_auth_users:
                 users_by_mode["render"] = total_auth_users
                 
-            github_clones = conn.execute("SELECT value FROM global_stats WHERE key = 'github_clones'").fetchone()
-            github_clones_val = github_clones[0] if github_clones else 0
+            github_clones = conn.execute("SELECT SUM(uniques) FROM github_daily_clones").fetchone()
+            github_clones_val = github_clones[0] if github_clones and github_clones[0] else 0
+            
+            github_downloads = conn.execute("SELECT value FROM global_stats WHERE key = 'github_downloads'").fetchone()
+            github_downloads_val = github_downloads[0] if github_downloads else 0
             
             total_ping_users = conn.execute("SELECT COUNT(DISTINCT user_hash) FROM pings").fetchone()[0]
-            total_unique = total_ping_users + total_auth_users + github_clones_val
+            total_unique = total_ping_users + total_auth_users + github_clones_val + github_downloads_val
             
         return {
             "tracked_since": tracked_since_val,

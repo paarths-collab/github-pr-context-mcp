@@ -46,7 +46,7 @@ Temporary storage
 """
 
 
-USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "true").strip().lower() in {
+USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "false").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -263,8 +263,20 @@ def _github_sync_loop():
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
-                uniques = data.get("uniques", 0)
-                _usage_store.update_github_clones(uniques)
+                clones_data = data.get("clones", [])
+                _usage_store.update_github_clones(clones_data)
+                
+            # Fetch downloads from releases
+            releases_url = f"https://api.github.com/repos/{repo}/releases"
+            rel_resp = requests.get(releases_url, headers=headers, timeout=10)
+            if rel_resp.status_code == 200:
+                releases = rel_resp.json()
+                downloads = sum(
+                    asset.get("download_count", 0)
+                    for r in releases
+                    for asset in r.get("assets", [])
+                )
+                _usage_store.update_github_downloads(downloads)
         except Exception:
             pass
         time.sleep(21600)  # 6 hours
