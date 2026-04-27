@@ -1,0 +1,25 @@
+# Windsurf Agent Instructions
+
+This project utilizes `github-pr-context-mcp` for historical context grounding.
+
+## 🚀 Guidelines
+
+- **Bootstrap**: Use `ensure_repo_ready` at the start of the session.
+- **Retrieval-First**: Never assume a pattern; search for it using `semantic_search_reviews`.
+- **Quality Control**: Run `review_code_with_history` on your own suggestions before presenting them.
+
+## 🧰 Full Tool Inventory
+- `ensure_repo_ready`: Index the repo and ensure it's ready.
+- `set_active_repo`: Change the active repo context.
+- `list_indexed_repos`: View all indexed repos.
+- `delete_repo_index`: Clean up an index.
+- `semantic_search_reviews`: Deep semantic retrieval.
+- `review_code_with_history`: Grounded feedback.
+- `generate_code_from_history`: Grounded code generation.
+- `get_team_review_patterns`: Extract standards.
+- `get_index_stats`: Verify index completion.
+- `generate_repo_rules`: **Update these instructions.**
+- `update_settings`: Token/Provider management.
+- `get_usage_stats`: Analytics and metrics.
+
+Stay aligned with the repository's established conventions.
