@@ -1,0 +1,95 @@
+import json
+from mcp.server.fastmcp import Context
+from inference import review_with_context, summarize_patterns
+from storage import query_similar
+from app.state import (
+    resolve_namespace,
+    get_state,
+    current_user_settings,
+    track_usage,
+    resolve_repo,
+    is_temporary,
+    llm_settings
+)
+
+def register_analysis_tools(mcp):
+    @mcp.tool(name="semantic_search_reviews")
+    def semantic_search_reviews(
+        query: str,
+        repo: str | None = None,
+        n_results: int = 8,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Search past review comments semantically."""
+        if ctx is None:
+            raise ValueError("Context is required")
+
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "semantic_search_reviews")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+
+        results = query_similar(
+            repo_key,
+            query,
+            n_results=n_results,
+            temporary=temporary,
+            namespace=namespace,
+        )
+        return json.dumps(results, indent=2)
+
+    @mcp.tool(name="review_code_with_history")
+    def review_code_with_history(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Perform code review grounded in historical PR review context."""
+        if ctx is None:
+            raise ValueError("Context is required")
+
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "review_code_with_history")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+
+        user_settings = current_user_settings()
+        context = query_similar(
+            repo_key,
+            code,
+            n_results=10,
+            temporary=temporary,
+            namespace=namespace,
+        )
+        return review_with_context(code, context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="get_team_review_patterns")
+    def get_team_review_patterns(
+        topic: str = "general code quality",
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Summarize recurring review patterns for a repo."""
+        if ctx is None:
+            raise ValueError("Context is required")
+
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "get_team_review_patterns")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+
+        user_settings = current_user_settings()
+        context = query_similar(
+            repo_key,
+            topic,
+            n_results=20,
+            temporary=temporary,
+            namespace=namespace,
+        )
+        return summarize_patterns(context, repo_key, settings=llm_settings(user_settings))
