@@ -12,6 +12,7 @@ from storage import (
 )
 from app.state import (
     normalize_repo,
+    normalize_namespace,
     resolve_namespace,
     repo_state_key,
     get_state,
