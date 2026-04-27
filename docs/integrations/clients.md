@@ -168,17 +168,12 @@ No install step — `uvx` downloads and runs from GitHub automatically.
   "mcpServers": {
     "github-pr-context": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/paarths-collab/github-pr-context-mcp",
-        "github-pr-context-mcp"
-      ],
+      "args": ["github-pr-context-mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_your_github_pat",
         "LLM_PROVIDER": "cerebras",
         "LLM_MODEL": "llama3.1-8b",
-        "LLM_API_KEY": "your_llm_api_key",
-        "CHROMA_PERSIST_DIR": "/your/home/dir/.github-pr-mcp-db"
+        "LLM_API_KEY": "your_llm_api_key"
       }
     }
   }
@@ -193,17 +188,12 @@ For **VS Code Copilot** add `"type": "stdio"`:
     "github-pr-context": {
       "type": "stdio",
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/paarths-collab/github-pr-context-mcp",
-        "github-pr-context-mcp"
-      ],
+      "args": ["github-pr-context-mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_your_github_pat",
         "LLM_PROVIDER": "cerebras",
         "LLM_MODEL": "llama3.1-8b",
-        "LLM_API_KEY": "your_llm_api_key",
-        "CHROMA_PERSIST_DIR": "/your/home/dir/.github-pr-mcp-db"
+        "LLM_API_KEY": "your_llm_api_key"
       }
     }
   }
@@ -216,7 +206,7 @@ For **VS Code Copilot** add `"type": "stdio"`:
 
 First install once:
 ```bash
-pipx install "git+https://github.com/paarths-collab/github-pr-context-mcp"
+pipx install github-pr-context-mcp
 ```
 
 Then configure your IDE:

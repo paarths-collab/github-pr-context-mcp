@@ -21,6 +21,24 @@
 
 ---
 
+## 🚀 Quick Start
+
+The fastest way to use the server is via **uvx** or **pipx**. No cloning required.
+
+### Using uvx (Recommended)
+```bash
+uvx github-pr-context-mcp
+```
+
+### Using pipx
+```bash
+pipx run github-pr-context-mcp
+```
+
+For full configuration (Cursor, Claude Desktop), see the [**Quick Start Guide**](docs/quickstart.md).
+
+---
+
 ## Overview
 
 GitHub PR Review Context MCP gives AI assistants institutional review memory.

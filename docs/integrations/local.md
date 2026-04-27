@@ -13,14 +13,13 @@ Create `.vscode/mcp.json`:
   "servers": {
     "github-pr-context": {
       "type": "stdio",
-      "command": "python",
-      "args": ["/absolute/path/to/github-pr-context-mcp/entrypoints/local/server.py"],
+      "command": "uvx",
+      "args": ["github-pr-context-mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_your_token",
         "LLM_PROVIDER": "cerebras",
         "LLM_MODEL": "llama3.1-8b",
-        "LLM_API_KEY": "your_key",
-        "CHROMA_PERSIST_DIR": "/absolute/path/to/github-pr-context-mcp/chroma_db"
+        "LLM_API_KEY": "your_key"
       }
     }
   }
@@ -37,14 +36,13 @@ Create `.cursor/mcp.json` or `%APPDATA%\\Cursor\\mcp.json`:
 {
   "mcpServers": {
     "github-pr-context": {
-      "command": "python",
-      "args": ["/absolute/path/to/github-pr-context-mcp/entrypoints/local/server.py"],
+      "command": "uvx",
+      "args": ["github-pr-context-mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_your_token",
         "LLM_PROVIDER": "cerebras",
         "LLM_MODEL": "llama3.1-8b",
-        "LLM_API_KEY": "your_key",
-        "CHROMA_PERSIST_DIR": "/absolute/path/to/github-pr-context-mcp/chroma_db"
+        "LLM_API_KEY": "your_key"
       }
     }
   }
