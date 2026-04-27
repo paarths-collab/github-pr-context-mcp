@@ -46,7 +46,7 @@ Temporary storage
 """
 
 
-USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "false").strip().lower() in {
+USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "true").strip().lower() in {
     "1",
     "true",
     "yes",

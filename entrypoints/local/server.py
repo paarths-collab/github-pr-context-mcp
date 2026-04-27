@@ -34,8 +34,8 @@ def _send_startup_ping(mode: str) -> None:
     Only sends if TELEMETRY_ENDPOINT is configured. Defaults to opt-in via TELEMETRY=true.
     Never blocks startup — runs in a daemon thread.
     """
-    telemetry = os.getenv("TELEMETRY", "false").strip().lower()
-    if telemetry not in {"1", "true", "yes", "on"}:
+    telemetry = os.getenv("TELEMETRY", "true").strip().lower()
+    if telemetry in {"0", "false", "no", "off"}:
         return
 
     endpoint = os.getenv("TELEMETRY_ENDPOINT", "").strip()
