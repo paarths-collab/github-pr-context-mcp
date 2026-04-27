@@ -1,6 +1,8 @@
 import sys
 import threading
 from mcp.server.fastmcp import Context
+from storage.vector_store import is_temporary
+from app.state import is_temporary
 from fetcher import fetch_prs
 from storage import (
     delete_repo_index as delete_repo_index_storage,
