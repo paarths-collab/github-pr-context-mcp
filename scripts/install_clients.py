@@ -47,7 +47,14 @@ CLIENTS = {
 
 def prompt_config():
     print("=== GitHub PR Context MCP Server Setup ===")
-    print("\nHow are you running this MCP Server?")
+    
+    # Check if running from a git clone
+    if os.path.exists(".git"):
+        print("\n[!] NOTICE: You are running this setup from a local git clone.")
+        print("    For most users, we recommend: 'pipx install github-pr-context-mcp'")
+        print("    This automatically handles absolute paths and simplifies updates.\n")
+
+    print("How are you running this MCP Server?")
     print("1. Locally (using uvx or python from this directory)")
     print("2. Hosted on Render (SSE / Remote)")
     

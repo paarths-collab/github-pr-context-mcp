@@ -14,14 +14,14 @@ Render hosting is **UPCOMING**. Once available, users will register a Gmail addr
 ## Installation & setup
 
 ### 🚀 Zero-Setup (uvx / pipx / npx)
-The fastest way to use the server without even downloading the code. Just run one of these commands directly in your IDE's MCP environment:
+The fastest way to use the server. No cloning required. Just run one of these commands directly in your terminal or use them in your IDE's MCP settings:
 
-**Using uvx (Recommended):**
+**Using uvx (Recommended for speed):**
 ```bash
 uvx github-pr-context-mcp
 ```
 
-**Using pipx (Recommended for global install):**
+**Using pipx (Recommended for stability):**
 ```bash
 pipx run github-pr-context-mcp
 # To install permanently as a global command:
@@ -33,14 +33,16 @@ pipx install github-pr-context-mcp
 npx -y @smithery/cli run github-pr-context-mcp
 ```
 
-### ⚡ Automatic Setup (Git Clone)
-If you have already cloned this repository and want the IDE to manage it automatically:
+---
 
-```bash
-python scripts/install_clients.py
-```
-> [!TIP]
-> Run this inside your virtual environment (`.venv`). It detects your IDE and bakes in absolute paths for you.
+### ⚠️ Manual Installation (Git Clone / Advanced)
+> [!WARNING]
+> Running from a git clone is **only recommended for developers** contributing to this project. For general use, please use the `pipx` method above.
+
+If you have cloned the repository for development:
+1. Create a virtual environment: `python -m venv .venv`
+2. Activate it and install: `pip install -e .`
+3. Run automatic setup: `python scripts/install_clients.py`
 
 ### 📦 Manual PIP Install
 If you prefer standard pip:

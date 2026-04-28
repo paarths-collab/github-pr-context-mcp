@@ -1,9 +1,20 @@
 # GitHub PR Review Context MCP
 
 > [!IMPORTANT]
-> **📣 NOW ON PYPI:** The project has officially moved to PyPI. 
-> If you previously git-cloned this repo, we recommend switching to the much simpler `uvx` or `pipx` installation methods.
-> Run `pipx install github-pr-context-mcp` to get the latest version!
+> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI. 
+> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
+>
+> **Recommended Install:**
+> ```bash
+> pipx install github-pr-context-mcp
+> ```
+> Or run instantly with: `uvx github-pr-context-mcp`
+
+<div align="center">
+  <img src="mcp_tool_guide_premium_1777183603306.png" width="800" alt="GitHub PR Context MCP Tools">
+</div>
+
+<br/>
 
 <div align="center">
 
@@ -14,7 +25,7 @@
 ![Inference](https://img.shields.io/badge/LLM-Multi--Provider-brightgreen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/Render%20Hosting-Upcoming-gray)
-![Downloads](https://img.shields.io/badge/downloads-525-blue)
+![Downloads](https://img.shields.io/badge/downloads-750-blue)
 <!-- [![Users](https://img.shields.io/endpoint?url=https://github-pr-context-mcp.onrender.com/usage/badge)](https://github-pr-context-mcp.onrender.com/usage) -->
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
@@ -22,23 +33,44 @@
 
 > Tracking unique users across **uvx**, **pipx**, and **local** sources. (Render hosting upcoming)
 
-</div>
-
 ---
 
 ## 🚀 Quick Start
 
-The fastest way to use the server is via **uvx** or **pipx**. No cloning required.
+### 🚀 Zero-Setup (uvx / pipx / npx)
+The fastest way to use the server. No cloning required. Just run one of these commands directly in your terminal or use them in your IDE's MCP settings:
 
-### Using uvx (Recommended)
+> [!TIP]
+> **Don't clone this repo to get AI rules!** 
+> Once installed, run `generate_repo_rules` inside **YOUR** project to automatically create `.cursorrules` or `CLAUDE.md` tailored to your own team's PR history.
+
+**Using uvx (Recommended for speed):**
 ```bash
 uvx github-pr-context-mcp
 ```
 
-### Using pipx
+**Using pipx (Recommended for stability):**
 ```bash
 pipx run github-pr-context-mcp
+# Or install permanently:
+pipx install github-pr-context-mcp
 ```
+
+**Using npx (Smithery bridge):**
+```bash
+npx -y @smithery/cli run github-pr-context-mcp
+```
+
+---
+
+### ⚠️ Manual Installation (Git Clone / Advanced)
+> [!WARNING]
+> Running from a git clone is **only recommended for developers** contributing to this project. For general use, please use the `pipx` method above.
+
+If you have cloned the repository for development:
+1. Create a virtual environment: `python -m venv .venv`
+2. Activate it and install: `pip install -e .`
+3. Run automatic setup: `python scripts/install_clients.py`
 
 For full configuration (Cursor, Claude Desktop), see the [**Quick Start Guide**](docs/quickstart.md).
 
@@ -110,7 +142,7 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 
 ## 🖼️ Premium Tools Interface
 
-![mcp-tools](assets/tools_list.png)
+![mcp-tools](mcp_tool_guide_premium_1777183603306.png)
 
 *The server now exposes a comprehensive suite of 12 tools for deep repository analysis and rules synthesis.*
 

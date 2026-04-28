@@ -268,9 +268,16 @@ Troubleshooting (JSON for AI Agents):
     # Run the server
     if mode == "local":
         print(
-            "\n[ANNOUNCEMENT] github-pr-context-mcp is now available on PyPI!\n"
-            "We recommend switching to the official package for seamless updates:\n"
-            "Run: pipx install github-pr-context-mcp\n",
+            "\n" + "="*60 + "\n"
+            "[ANNOUNCEMENT] github-pr-context-mcp is now available on PyPI!\n"
+            "="*60 + "\n"
+            "You are running from a local git clone. We strongly recommend\n"
+            "switching to the official package for:\n"
+            "  1. Automatic path management in IDEs\n"
+            "  2. One-click updates (pipx upgrade)\n"
+            "  3. Cleaner environment isolation\n\n"
+            "Run: pipx install github-pr-context-mcp\n"
+            "="*60 + "\n",
             file=sys.stderr
         )
 
