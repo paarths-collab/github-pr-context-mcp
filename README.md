@@ -11,7 +11,7 @@
 > Or run instantly with: `uvx github-pr-context-mcp`
 
 <div align="center">
-  <img src="mcp_tool_guide_premium_1777183603306.png" width="800" alt="GitHub PR Context MCP Tools">
+  <img src="assets/mcp_tool_guide_premium_1777183603306.png" width="800" alt="GitHub PR Context MCP Tools">
 </div>
 
 <br/>
@@ -143,7 +143,7 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 
 ## 🖼️ Premium Tools Interface
 
-![mcp-tools](mcp_tool_guide_premium_1777183603306.png)
+![mcp-tools](assets/mcp_tool_guide_premium_1777183603306.png)
 
 *The server now exposes a comprehensive suite of 12 tools for deep repository analysis and rules synthesis.*
 
