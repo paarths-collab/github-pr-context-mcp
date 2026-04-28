@@ -32,6 +32,7 @@
 
 
 > Tracking unique users across **uvx**, **pipx**, and **local** sources. (Render hosting upcoming)
+</div>
 
 ---
 
@@ -169,24 +170,17 @@ The server exposes 12 core tools for IDE agents and developers. For a deep dive 
 
 ---
 
-## Documentation
-
-Detailed guides are split into focused pages:
-
-- [Quick Start and Usage](docs/quickstart.md)
-- [LLM Configuration](docs/llm-configuration.md)
-- [Integrations](docs/integrations/index.md)
-- [Architecture and Tools](docs/architecture.md)
-- [Pipeline Deep Dive](docs/pipeline.md)
-- [Configuration Guide (Change Tokens/Settings)](docs/guides/configuration.md)
-- [Roadmap](docs/roadmap.md)
-
 ---
 
-## Quick Links
+## 📖 Documentation
 
-- Access setup: [GitHub Token Guide](docs/GUIDE_GITHUB_TOKEN.md)
-- Client connection: [Integrations](docs/integrations/index.md)
+Detailed guides for deep dives and specific configurations:
+
+- 🛠️ [**Quick Start & Usage**](docs/quickstart.md) — Setup and basic commands.
+- ⚙️ [**LLM Configuration**](docs/llm-configuration.md) — Switching between OpenAI, Anthropic, Gemini, and Cerebras.
+- 🧩 [**Tool Strategy & Selection Guide**](docs/tools_strategy.md) — When to use which tool (for humans and agents).
+- 🏗️ [**Architecture & Pipeline**](docs/architecture.md) — How the RAG engine and indexing work.
+- 🔌 [**Integrations**](docs/integrations/index.md) — Connecting to Cursor, Claude Desktop, and more.
 
 ---
 
@@ -194,23 +188,11 @@ Detailed guides are split into focused pages:
 
 We want to hear from you—whether you are a solo developer or a team at a large company!
 
-### 👤 For Individuals
 - **Feedback**: Please open an issue or start a discussion if you have ideas or encounter bugs.
-- **Show your support**: If this tool saves you time, give it a **Star ⭐**! It helps others find the project.
-
-### 🏢 For Corporate & Teams
-- **Usage**: Is your team using this MCP server? Join our "Adopters" list by opening a PR to add your team's name.
-- **Corporate Feedback**: Open an issue with the `corporate-usage` label to tell us how this has improved your PR review workflow.
-- **Custom Integration**: Need help deploying this to your private cloud? Reach out via GitHub Discussions.
+- **Star ⭐**: If this tool saves you time, give it a star! It helps others find the project.
+- **Corporate**: Is your team using this? Join our "Adopters" list by opening a PR to add your team's name.
 
 ---
-
-## 📜 Documentation & Guides
-
-- **Strategy & Best Practices**: [Tool Strategy & Selection Guide](docs/tools_strategy.md)
-- **Architecture**: [Architecture and Tools](docs/architecture.md)
-- **Pipeline**: [Pipeline Deep Dive](docs/pipeline.md)
-- **Usage**: [Quick Start and Usage](docs/quickstart.md)
 
 ## 🛠️ Troubleshooting
 
