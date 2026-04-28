@@ -2,7 +2,7 @@
 
 This guide is the **single source of truth** for all tools available in the GitHub PR Context MCP server. It is designed to be read by **both humans and AI agents**.
 
-![Tool Strategy Guide](../assets/mcp_tool_guide_premium_1777183603306.png)
+![Tool Strategy Guide](../assets/mcp_tool_guide_premium_v2.png)
 
 ---
 
