@@ -19,26 +19,6 @@
 
 </div>
 
----
-
-> [!IMPORTANT]
-> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI. 
-> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
->
-> **Recommended Install:**
-> ```bash
-> pipx install github-pr-context-mcp
-> ```
-> Or run instantly with: `uvx github-pr-context-mcp`
-
-<div align="center">
-  <img src="assets/mcp_tool_guide_premium_v2.png" width="800" alt="GitHub PR Context MCP Tools">
-</div>
-
-<br/>
-
----
-
 ## 🚀 Quick Start
 
 ### 🚀 Zero-Setup (uvx / pipx / npx)
@@ -130,6 +110,24 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 
 ---
 
+> [!IMPORTANT]
+> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI. 
+> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
+>
+> **Recommended Install:**
+> ```bash
+> pipx install github-pr-context-mcp
+> ```
+> Or run instantly with: `uvx github-pr-context-mcp`
+
+<div align="center">
+  <img src="assets/mcp_tool_guide_premium_v2.png" width="800" alt="GitHub PR Context MCP Tools">
+</div>
+
+<br/>
+
+---
+
 ## Key Capabilities
 
 | Capability | What It Delivers |
@@ -142,13 +140,6 @@ If your team has Hosted this MCP on Render, you do **NOT** need to `git clone` o
 | Flexible storage modes | Permanent (disk) and temporary (in-memory) indexing options |
 | Portable inference layer | Switch LLM providers using environment configuration only |
 
----
-
-## 🖼️ Premium Tools Interface
-
-![mcp-tools](assets/mcp_tool_guide_premium_v2.png)
-
-*The server now exposes a comprehensive suite of 12 tools for deep repository analysis and rules synthesis.*
 
 ---
 
