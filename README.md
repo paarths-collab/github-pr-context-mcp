@@ -1,20 +1,6 @@
 # GitHub PR Review Context MCP
 
-> [!IMPORTANT]
-> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI. 
-> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
->
-> **Recommended Install:**
-> ```bash
-> pipx install github-pr-context-mcp
-> ```
-> Or run instantly with: `uvx github-pr-context-mcp`
 
-<div align="center">
-  <img src="assets/mcp_tool_guide_premium_1777183603306.png" width="800" alt="GitHub PR Context MCP Tools">
-</div>
-
-<br/>
 
 <div align="center">
 
@@ -31,8 +17,25 @@
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 
 
-> Tracking unique users across **uvx**, **pipx**, and **local** sources. (Render hosting upcoming)
 </div>
+
+---
+
+> [!IMPORTANT]
+> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI. 
+> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
+>
+> **Recommended Install:**
+> ```bash
+> pipx install github-pr-context-mcp
+> ```
+> Or run instantly with: `uvx github-pr-context-mcp`
+
+<div align="center">
+  <img src="assets/mcp_tool_guide_premium_1777183603306.png" width="800" alt="GitHub PR Context MCP Tools">
+</div>
+
+<br/>
 
 ---
 
