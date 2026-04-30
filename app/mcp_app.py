@@ -1,3 +1,4 @@
+import sys
 import os
 import threading
 from mcp.server.fastmcp import FastMCP
@@ -42,12 +43,12 @@ def _github_sync_loop():
         return
     
     owner, name = repo.split("/", 1)
-    print(f"Starting GitHub traffic sync for {repo}...", flush=True)
+    print(f"Starting GitHub traffic sync for {repo}...", file=sys.stderr, flush=True)
     while True:
         try:
             usage_store.sync_github_traffic(owner, name, token)
         except Exception as e:
-            print(f"GitHub traffic sync failed: {e}", flush=True)
+            print(f"GitHub traffic sync failed: {e}", file=sys.stderr, flush=True)
         import time
         time.sleep(3600 * 12)  # Sync every 12 hours
 
