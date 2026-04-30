@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 
 # Import the actual methods we modified
 from entrypoints.local.server import _machine_fingerprint, _detect_mode
-from app.mcp_app import _resolve_namespace
+from app.state import resolve_namespace as _resolve_namespace
 import storage.vector_store as vs
 
 
@@ -55,8 +55,8 @@ def test_chroma_persist_dir_default():
 
 
 ### Test Bug 2: Auth Exception handling wraps correctly 
-@patch("app.mcp_app.AUTH_REQUIRED", True)
-@patch("app.mcp_app._current_user_email", return_value=None)
+@patch("app.state.AUTH_REQUIRED", True)
+@patch("app.state.current_user_email", return_value=None)
 def test_resolve_namespace_unauthorized_exception(mock_email):
     """
     Bug 2: When users aren't authenticated locally, but AUTH_REQUIRED is True 
@@ -69,8 +69,8 @@ def test_resolve_namespace_unauthorized_exception(mock_email):
     assert "Unauthorized: missing identity when AUTH_REQUIRED is true." in str(excinfo.value)
 
 
-@patch("app.mcp_app.AUTH_REQUIRED", True)
-@patch("app.mcp_app._current_user_email", return_value="alice@gmail.com")
+@patch("app.state.AUTH_REQUIRED", True)
+@patch("app.state.current_user_email", return_value="alice@gmail.com")
 def test_resolve_namespace_authorized(mock_email):
     """
     Bug 2 related: Even if a user tries to access 'bob@gmail.com' (IDOR attempt), 
