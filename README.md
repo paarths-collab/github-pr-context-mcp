@@ -15,7 +15,7 @@
 > uvx --upgrade github-pr-context-mcp
 > ```
 
-**Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
+**Context layer for AI code review, grounded in your repository's real pull request history.**
 
 </div>
 
