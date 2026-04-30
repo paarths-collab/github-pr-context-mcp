@@ -4,13 +4,16 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Data Source](https://img.shields.io/badge/Data-GitHub%20PR%20History-black?logo=github)
-![Vector Store](https://img.shields.io/badge/Storage-ChromaDB-orange)
-![Inference](https://img.shields.io/badge/LLM-Multi--Provider-brightgreen)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Status](https://img.shields.io/badge/Render%20Hosting-Upcoming-gray)
+![Version](https://img.shields.io/badge/version-0.2.8-green)
 ![Downloads](https://img.shields.io/badge/downloads-1k+-blue)
-<!-- [![Users](https://img.shields.io/endpoint?url=https://github-pr-context-mcp.onrender.com/usage/badge)](https://github-pr-context-mcp.onrender.com/usage) -->
+
+> [!IMPORTANT]
+> **URGENT UPGRADE (v0.2.8):** This release fixes critical import regressions and stdout pollution that caused MCP crashes in Cursor and Claude Desktop.
+> ```bash
+> pipx upgrade github-pr-context-mcp
+> # OR
+> uvx --upgrade github-pr-context-mcp
+> ```
 
 **Production-grade context layer for AI code review, grounded in your repository's real pull request history.**
 
