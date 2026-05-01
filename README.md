@@ -17,7 +17,16 @@
 
 **Context layer for AI code review, grounded in your repository's real pull request history.**
 
-</div>
+---
+
+## ❤️ Community Feedback
+We want to hear from you! Your reviews help us improve and reach more developers.
+
+👉 [**Write a Review / Share your Experience**](https://forms.gle/pEnwgcU8NXGhqKeH6)
+
+*"This MCP is like having a teammate with perfect memory of every PR ever written."* — Example Review
+
+---
 
 ---
 
