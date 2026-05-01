@@ -1,7 +1,5 @@
 # GitHub PR Review Context MCP
 
-<div align="center">
-
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
 ![Version](https://img.shields.io/badge/version-0.2.8-green)
@@ -170,9 +168,7 @@ The server exposes 12 core tools for IDE agents and developers. For a deep dive 
 | `update_settings` | Update tokens/LLM keys (Hosted mode only) |
 | `get_usage_stats` | View adoption metrics and unique user counts |
 
-<div align="center">
-  <img src="assets/mcp_tool_guide_premium_v2.png" width="800" alt="GitHub PR Context MCP Tools">
-</div>
+<img src="assets/mcp_tool_guide_premium_v2.png" width="800" alt="GitHub PR Context MCP Tools">
 
 ---
 
