@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
 ![Version](https://img.shields.io/badge/version-0.2.8-green)
-![Downloads](https://img.shields.io/badge/downloads-1k+-blue)
+![Downloads](https://img.shields.io/badge/downloads-1.5k+-blue)
 
 > [!IMPORTANT]
 > **URGENT UPGRADE (v0.2.8):** This release fixes critical import regressions and stdout pollution that caused MCP crashes in Cursor and Claude Desktop.
