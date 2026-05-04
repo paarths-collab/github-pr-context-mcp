@@ -1,6 +1,13 @@
 import json
 from mcp.server.fastmcp import Context
-from inference import review_with_context, summarize_patterns
+from inference import (
+    review_with_context,
+    summarize_patterns,
+    generate_tests_with_context,
+    static_analysis_review,
+    suggest_refactors,
+    document_code_changes
+)
 from storage import query_similar
 from app.state import (
     resolve_namespace,
@@ -93,3 +100,98 @@ def register_analysis_tools(mcp):
             namespace=namespace,
         )
         return summarize_patterns(context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="generate_tests")
+    def generate_tests(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Generate unit tests grounded in repository's testing style."""
+        if ctx is None: raise ValueError("Context is required")
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "generate_tests")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+        user_settings = current_user_settings()
+        context = query_similar(repo_key, "unit testing integration mock fixtures", n_results=10, temporary=temporary, namespace=namespace)
+        return generate_tests_with_context(code, context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="static_analysis")
+    def static_analysis(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Perform a human-like static analysis based on historical review feedback."""
+        if ctx is None: raise ValueError("Context is required")
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "static_analysis")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+        user_settings = current_user_settings()
+        context = query_similar(repo_key, "lint style nit readability clean code", n_results=10, temporary=temporary, namespace=namespace)
+        return static_analysis_review(code, context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="suggest_refactors")
+    def suggest_refactors_tool(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Suggest refactorings based on repository's clean code patterns."""
+        if ctx is None: raise ValueError("Context is required")
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "suggest_refactors")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+        user_settings = current_user_settings()
+        context = query_similar(repo_key, "refactor DRY modularity performance", n_results=10, temporary=temporary, namespace=namespace)
+        return suggest_refactors(code, context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="document_changes")
+    def document_changes(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Generate documentation matching the team's style."""
+        if ctx is None: raise ValueError("Context is required")
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "document_changes")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+        user_settings = current_user_settings()
+        context = query_similar(repo_key, "docstring comment README documentation", n_results=10, temporary=temporary, namespace=namespace)
+        return document_code_changes(code, context, repo_key, settings=llm_settings(user_settings))
+
+    @mcp.tool(name="security_check")
+    def security_check(
+        code: str,
+        repo: str | None = None,
+        namespace: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """Check code for security vulnerabilities and compliance issues."""
+        if ctx is None: raise ValueError("Context is required")
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "security_check")
+        repo_key = resolve_repo(repo, state)
+        temporary = is_temporary(repo_key, namespace, state)
+        user_settings = current_user_settings()
+        # Query for past security-related feedback
+        context = query_similar(repo_key, "security vulnerability injection sanitization auth", n_results=10, temporary=temporary, namespace=namespace)
+        
+        system_prompt = "You are a security auditor. Analyze the code for vulnerabilities, injection risks, and compliance with secure coding standards."
+        user_message = f"Repository: {repo_key}\n\nCODE TO AUDIT:\n{code}\n\nHISTORICAL SECURITY CONTEXT:\n{context}"
+        from inference.providers import chat
+        return chat(messages=[{"role": "user", "content": user_message}], system=system_prompt, max_tokens=1024, settings=llm_settings(user_settings))

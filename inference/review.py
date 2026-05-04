@@ -173,3 +173,72 @@ def generate_rules_content(
         max_tokens=2048,
         settings=settings,
     )
+
+
+TEST_GEN_SYSTEM_PROMPT = """You are a senior test engineer.
+Your goal is to generate comprehensive unit and integration tests for the provided code.
+Use the repository's historical PR context to identify common testing patterns, frameworks (pytest, unittest, etc.), and mocking strategies used by the team.
+Ensure your tests cover edge cases, error handling, and follow the team's naming conventions for tests."""
+
+
+def generate_tests_with_context(
+    code: str,
+    retrieved_context: list[dict],
+    repo: str,
+    settings: dict | None = None,
+) -> str:
+    """Generate tests grounded in historical testing patterns."""
+    context_text = "\n---\n".join([f"[{c['similarity']:.2f}] {c['text'][:400]}" for c in retrieved_context[:8]])
+    user_message = f"Repository: {repo}\n\nHISTORICAL TESTING CONTEXT:\n{context_text}\n\n---\nCODE TO TEST:\n{code}\n\nGenerate appropriate tests."
+    return chat(messages=[{"role": "user", "content": user_message}], system=TEST_GEN_SYSTEM_PROMPT, max_tokens=2048, settings=settings)
+
+
+STATIC_ANALYSIS_SYSTEM_PROMPT = """You are a static analysis expert.
+Scan the code for issues that a linter or static analyzer would catch, but ground your feedback in what this SPECIFIC team cares about.
+Use historical PR context to see what linting or style issues are frequently flagged by humans in this repo."""
+
+
+def static_analysis_review(
+    code: str,
+    retrieved_context: list[dict],
+    repo: str,
+    settings: dict | None = None,
+) -> str:
+    """Perform a static-analysis style review grounded in team history."""
+    context_text = "\n---\n".join([f"[{c['similarity']:.2f}] {c['text'][:400]}" for c in retrieved_context[:8]])
+    user_message = f"Repository: {repo}\n\nHISTORICAL LINT/STYLE CONTEXT:\n{context_text}\n\n---\nCODE TO ANALYZE:\n{code}"
+    return chat(messages=[{"role": "user", "content": user_message}], system=STATIC_ANALYSIS_SYSTEM_PROMPT, max_tokens=1024, settings=settings)
+
+
+REFACTOR_SYSTEM_PROMPT = """You are a clean code and refactoring expert.
+Suggest refactorings for the provided code to improve readability, maintainability, and performance.
+Base your suggestions on patterns seen in the repository's successful PRs."""
+
+
+def suggest_refactors(
+    code: str,
+    retrieved_context: list[dict],
+    repo: str,
+    settings: dict | None = None,
+) -> str:
+    """Suggest refactors grounded in repo patterns."""
+    context_text = "\n---\n".join([f"[{c['similarity']:.2f}] {c['text'][:400]}" for c in retrieved_context[:8]])
+    user_message = f"Repository: {repo}\n\nHISTORICAL REFACTORING CONTEXT:\n{context_text}\n\n---\nCODE TO REFACTOR:\n{code}"
+    return chat(messages=[{"role": "user", "content": user_message}], system=REFACTOR_SYSTEM_PROMPT, max_tokens=2048, settings=settings)
+
+
+DOC_SYSTEM_PROMPT = """You are a technical writer and senior dev.
+Generate documentation (docstrings, README updates, or inline comments) for the code changes.
+Use historical context to match the team's documentation style (e.g. Google style, NumPy style)."""
+
+
+def document_code_changes(
+    code: str,
+    retrieved_context: list[dict],
+    repo: str,
+    settings: dict | None = None,
+) -> str:
+    """Generate documentation grounded in repo style."""
+    context_text = "\n---\n".join([f"[{c['similarity']:.2f}] {c['text'][:400]}" for c in retrieved_context[:8]])
+    user_message = f"Repository: {repo}\n\nHISTORICAL DOC STYLE CONTEXT:\n{context_text}\n\n---\nCODE TO DOCUMENT:\n{code}"
+    return chat(messages=[{"role": "user", "content": user_message}], system=DOC_SYSTEM_PROMPT, max_tokens=1024, settings=settings)

@@ -159,16 +159,19 @@ The server exposes 12 core tools for IDE agents and developers. For a deep dive 
 | `generate_repo_rules` | **Synthesize .cursorrules / CLAUDE.md from PR history** |
 | `generate_code_from_history` | Write code grounded in past commits & team style |
 | `review_code_with_history` | Perform AI review grounded in team review memory |
-| `get_team_review_patterns` | Summarize recurring team standards (e.g. "no magic numbers") |
-| `semantic_search_reviews` | Search past PR comments by meaning, not just keywords |
-| `set_active_repo` | Switch between multiple indexed repositories |
-| `list_indexed_repos` | View all repos currently in local/temporary storage |
+| `generate_tests` | **Generate unit tests matching repository style** |
+| `static_analysis` | **Perform human-like static analysis based on history** |
+| `suggest_refactors` | **Get refactoring ideas based on clean code patterns** |
+| `document_changes` | **Auto-generate documentation / docstrings** |
+| `security_check` | **Audit code for vulnerabilities & compliance** |
+| `get_team_review_patterns` | Summarize recurring team standards |
+| `semantic_search_reviews` | Search past PR comments by meaning |
+| `list_indexed_repos` | View all repos currently in storage |
 | `delete_repo_index` | Free up disk space by clearing repository indices |
-| `get_index_stats` | Verify if a repo index is complete (doc count) |
-| `update_settings` | Update tokens/LLM keys (Hosted mode only) |
+| `get_index_stats` | Verify if a repo index is complete |
 | `get_usage_stats` | View adoption metrics and unique user counts |
 
-<img src="assets/mcp_tool_guide_premium_v2.png" width="800" alt="GitHub PR Context MCP Tools">
+<img src="assets/mcp.png" width="800" alt="GitHub PR Context MCP Tools">
 
 ---
 
