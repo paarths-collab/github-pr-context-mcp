@@ -2,11 +2,11 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.2.8-green)
+![Version](https://img.shields.io/badge/version-0.2.9-green)
 ![Downloads](https://img.shields.io/badge/downloads-1.5k+-blue)
 
 > [!IMPORTANT]
-> **URGENT UPGRADE (v0.2.8):** This release fixes critical import regressions and stdout pollution that caused MCP crashes in Cursor and Claude Desktop.
+> **NEW RELEASE (v0.2.9):** Integrated advanced AI tools for Test Generation, Security Auditing, Static Analysis, and Refactoring suggestions grounded in your repo history.
 > ```bash
 > pipx upgrade github-pr-context-mcp
 > # OR
