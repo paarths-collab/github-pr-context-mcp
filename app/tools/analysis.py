@@ -6,7 +6,8 @@ from inference import (
     generate_tests_with_context,
     static_analysis_review,
     suggest_refactors,
-    document_code_changes
+    document_code_changes,
+    security_audit_with_context
 )
 from storage import query_similar
 from app.state import (
@@ -190,8 +191,4 @@ def register_analysis_tools(mcp):
         user_settings = current_user_settings()
         # Query for past security-related feedback
         context = query_similar(repo_key, "security vulnerability injection sanitization auth", n_results=10, temporary=temporary, namespace=namespace)
-        
-        system_prompt = "You are a security auditor. Analyze the code for vulnerabilities, injection risks, and compliance with secure coding standards."
-        user_message = f"Repository: {repo_key}\n\nCODE TO AUDIT:\n{code}\n\nHISTORICAL SECURITY CONTEXT:\n{context}"
-        from inference.providers import chat
-        return chat(messages=[{"role": "user", "content": user_message}], system=system_prompt, max_tokens=1024, settings=llm_settings(user_settings))
+        return security_audit_with_context(code, context, repo_key, settings=llm_settings(user_settings))
