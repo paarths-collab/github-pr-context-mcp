@@ -6,7 +6,8 @@ from inference.review import (
     generate_tests_with_context,
     static_analysis_review,
     suggest_refactors,
-    document_code_changes
+    document_code_changes,
+    security_audit_with_context
 )
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "generate_tests_with_context",
     "static_analysis_review",
     "suggest_refactors",
-    "document_code_changes"
+    "document_code_changes",
+    "security_audit_with_context"
 ]
