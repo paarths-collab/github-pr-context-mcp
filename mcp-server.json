@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "github-pr-context-mcp",
+  "title": "GitHub PR Review Context",
+  "description": "Context-aware AI code review grounded in your repository's real pull request history. Supports Test Gen, Security Audit, and Static Analysis.",
+  "version": "0.2.9",
+  "repository": {
+    "source": "github",
+    "url": "https://github.com/paarths-collab/github-pr-context-mcp"
+  },
+  "install": {
+    "uvx": "uvx github-pr-context-mcp",
+    "pipx": "pipx install github-pr-context-mcp"
+  },
+  "runtime": "python",
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": true
+  }
+}
