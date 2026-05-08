@@ -6,9 +6,9 @@
 ![GitHub GraphQL](https://img.shields.io/badge/Data-GitHub%20GraphQL-black?logo=github)
 ![Vector DB](https://img.shields.io/badge/Vector-ChromaDB-orange)
 ![Embeddings](https://img.shields.io/badge/Embeddings-all--MiniLM--L6--v2-purple)
-![Inference](https://img.shields.io/badge/Inference-Multi--Provider-blue)
+![Architecture](https://img.shields.io/badge/Architecture-Pure--Context-blue)
 
-**Context-aware code review architecture powered by retrieval from historical PR discussions.**
+**Pure-context architecture providing historical PR discussion retrieval to IDE agents.**
 
 </div>
 
@@ -19,7 +19,7 @@
 - [System Overview](#system-overview)
 - [Architecture Diagram](#architecture-diagram)
 - [Indexing Pipeline](#indexing-pipeline)
-- [Review Pipeline](#review-pipeline)
+- [Retrieval Pipeline](#retrieval-pipeline)
 - [Storage Design](#storage-design)
 - [MCP Tools](#mcp-tools)
 - [Project Structure](#project-structure)
@@ -28,26 +28,26 @@
 
 ## System Overview
 
-This project turns repository PR history into semantic memory for code review.
+This project turns repository PR history into semantic memory for IDE agents.
 
-High-level flow:
+Unlike traditional RAG systems that perform inference on the server, this architecture follows a **Pure Context** model:
 1. Fetch PR + review artifacts from GitHub GraphQL.
-2. Transform them into searchable documents.
-3. Embed and store in ChromaDB.
-4. Retrieve relevant historical context for a new snippet/diff.
-5. Generate review output through the selected LLM provider.
+2. Transform them into searchable documents and embed them locally.
+3. Store in ChromaDB.
+4. Retrieve relevant historical context as **raw JSON material**.
+5. The **IDE Agent** (Cursor, Claude, etc.) performs the final reasoning, review, or code generation.
 
 ---
 
 ## Architecture Diagram
 
-This diagram shows the end-to-end system topology across client, MCP server modules, and external services.
+This diagram shows the flow from retrieval to the IDE agent's decision-making.
 
 ```mermaid
 flowchart TB
-    subgraph Client["AI Client via MCP"]
+    subgraph Client["IDE Agent via MCP"]
         U[User Prompt]
-        A[Assistant]
+        A[Agent Reasoning]
     end
 
     subgraph Server["MCP Server"]
@@ -59,14 +59,11 @@ flowchart TB
         D["storage/document_builder.py"]
         E["storage/encoder.py"]
         V["storage/vector_store.py"]
-        R["inference/review.py"]
-        P["inference/providers.py"]
     end
 
     subgraph External["External Services"]
         GH[(GitHub GraphQL API)]
         DB[(ChromaDB)]
-        LLM[(LLM APIs)]
     end
 
     U --> A --> S
@@ -75,8 +72,7 @@ flowchart TB
     S --> F --> GH
     F --> T --> D --> E --> V --> DB
     S --> V
-    S --> R --> P --> LLM
-    R --> S --> A --> U
+    V --> S --> A --> U
 ```
 
 ### Component Legend
@@ -89,10 +85,8 @@ flowchart TB
 | `fetcher/client.py` | GitHub GraphQL requests, pagination, and error handling |
 | `fetcher/transform.py` | Raw PR node flattening and normalization |
 | `storage/document_builder.py` | Converts PR data into searchable document records |
-| `storage/encoder.py` | Embedding generation for retrieval |
+| `storage/encoder.py` | Local embedding generation (all-MiniLM-L6-v2) |
 | `storage/vector_store.py` | Chroma upsert/query and index stats |
-| `inference/review.py` | Context assembly and review prompt orchestration |
-| `inference/providers.py` | Multi-provider LLM adapter layer |
 
 ---
 
@@ -114,57 +108,36 @@ sequenceDiagram
     S->>S: Check existing Permanent/Temporary index
     alt Not Indexed
         S-->>C: Start Background Indexing Thread & Return Immediately
-        S->>G: Background Thread: Fetch PR pages (30/page up to 100 max length)
+        S->>G: Background Thread: Fetch PR pages (30/page)
         G-->>S: PR nodes + review threads + reviews + files
         S->>X: flatten_prs(nodes)
         X-->>S: normalized PR dictionaries
         S->>B: build_documents(prs)
-        B-->>S: docs, metadata (injecting namespace), ids
-        S->>M: encode(doc) per document
+        B-->>S: docs, metadata, ids
+        S->>M: encode(doc) locally
         M-->>S: embeddings
-        S->>V: upsert(documents, embeddings, metadatas, ids) into isolated collection
+        S->>V: upsert() into isolated collection
     end
 ```
 
-### Indexed Document Types
-
-| Type | Source | Typical Content |
-|---|---|---|
-| `pr_description` | PR title/body | Feature intent, rationale, scope |
-| `review_comment` | Inline thread comments | File/line-specific reviewer feedback |
-| `review_summary` | Review body | High-level approval/request changes reasoning |
-
 ---
 
-## Review Pipeline
+## Retrieval Pipeline
 
-This sequence illustrates how retrieved historical context is converted into a grounded, repository-aware review response.
+In the Pure Context model, the server provides the "evidence" and the IDE agent provides the "verdict."
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
+    participant C as IDE Agent
     participant S as review_code_with_history
     participant V as query_similar
-    participant P as Prompt Builder
-    participant L as LLM Provider
 
     C->>S: review_code_with_history(code, repo?)
-    S->>V: Semantic retrieval (n_results=10)
+    S->>V: Semantic retrieval (n_results=12)
     V-->>S: similar docs + metadata + distances
-    S->>P: keep top context slice (first 6)
-    P-->>S: grounded review prompt
-    S->>L: chat(messages, system, max_tokens)
-    L-->>S: review response
-    S-->>C: context-aware review
+    S-->>C: JSON Context Material
+    Note over C: Agent processes raw material <br/> and generates review.
 ```
-
-### Retrieval and Prompting Notes
-
-| Step | Implementation Detail | Why It Matters |
-|---|---|---|
-| Similarity metric | cosine distance converted to similarity via `1 - distance` | Human-readable relevance score |
-| Retrieval depth | Top 10 retrieved, top 6 used in review prompt | Balances recall vs token budget |
-| Prompt style | Senior reviewer, concrete issues, low-fluff | Better actionable review quality |
 
 ---
 
@@ -179,43 +152,21 @@ sequenceDiagram
 
 ### Collection Naming Strategy & Data Isolation
 
-`owner/repo` is normalized to `owner--repo` to generate safe collection names.
-To support high-concurrency environments like Render safely without spawning hundreds of identical collections for different users, the architecture uses **single-collection metadata isolation**. The single `owner--repo` collection holds all chunks, but uses ChromaDB's `where={"namespace": <identity>}` clause alongside `metadata["namespace"]` tags to enforce completely mathematically isolated queries per user identity.
+To support high-concurrency environments safely, the architecture uses **single-collection metadata isolation**. The single `owner--repo` collection holds all chunks, but uses ChromaDB's `where={"namespace": <identity>}` clause alongside `metadata["namespace"]` tags to enforce completely isolated queries per user identity.
 
 ---
 
 ## MCP Tools
 
-| Tool | Primary Purpose | Key Inputs | Typical Output |
-|---|---|---|---|
-| `ensure_repo_ready` | Auto-load or background-index a repository and activate session context | `repo`, optional `storage`, optional `pages` | Active repo state + indexing started status |
-| `set_active_repo` | Switch context to an already indexed repo | `repo` | Active repo switched confirmation |
-| `list_indexed_repos` | List all indexed repos (both storage modes) | none | Repo list + storage labels + doc counts |
-| `semantic_search_reviews` | Semantic retrieval over historical review artifacts | `query`, optional `repo`, optional `n_results` | Ranked context snippets |
-| `review_code_with_history` | Generate review using retrieved team history | `code`, optional `repo` | Grounded code review text |
-| `generate_code_from_history` | Generate new code grounded in team history | `task`, optional `repo` | Grounded code generation |
-
-| `get_team_review_patterns` | Summarize recurring review patterns | optional `repo`, optional `topic` | Pattern summary |
-| `get_index_stats` | Show indexed document count for a repo | optional `repo` | Stats JSON |
-
-<details>
-<summary><strong>Interactive Tool Contracts (expand)</strong></summary>
-
-### `ensure_repo_ready`
-- Checks permanent first, temporary second.
-- If not found and `storage` missing, prompts user to choose permanent vs temporary.
-- If storage provided, fetches PRs and indexes in a **background daemon thread** to prevent 60-second IDE LLM timeouts. It returns immediately asking the LLM to verify via `get_index_stats`.
-
-### `review_code_with_history`
-- Retrieves similar historical comments exactly filtered by `namespace` isolation.
-- Injects context into a review-focused system prompt.
-- Calls active LLM provider adapter.
-
-### `semantic_search_reviews`
-- Returns metadata-rich snippets with similarity score. Filtered strictly by IDOR-protected namespace.
-- Useful for manual inspection before invoking full review.
-
-</details>
+| Tool | Primary Purpose | typical Output |
+|---|---|---|
+| `ensure_repo_ready` | Auto-load or background-index a repository | Active repo state + indexing status |
+| `semantic_search_reviews` | General semantic search over historical artifacts | Raw context snippets |
+| `review_code_with_history` | Retrieve context specifically for code review | JSON material + agent instruction |
+| `get_team_review_patterns` | Retrieve raw material for pattern summarization | JSON patterns + agent instruction |
+| `generate_code_from_history` | Retrieve context for grounded code generation | JSON context + agent instruction |
+| `generate_tests` | Retrieve context for test generation | JSON patterns + agent instruction |
+| `get_repo_rules_material` | Retrieve data to write .cursorrules / CLAUDE.md | High-density JSON material |
 
 ---
 
@@ -224,35 +175,25 @@ To support high-concurrency environments like Render safely without spawning hun
 ```text
 github-pr-context-mcp/
 ├── docs/
-│   ├── integrations/      # IDE setup guides
-│   ├── architecture.md    # System design and tools
-│   ├── pipeline.md        # Pipeline operational flows
+│   ├── architecture.md    # System design (Pure Context)
 │   ├── quickstart.md      # Usage and storage guide
-│   ├── roadmap.md         # Future architectural debt
-│   └── GUIDE_GITHUB_TOKEN.md 
-├── scripts/
-│   ├── install_clients.py # Automated IDE configuration
-│   └── indexer.py         # CLI indexer for manual pre-fetch/index
+│   └── roadmap.md         
 ├── auth/
-│   └── gmail_identity.py  # User identity & SQLite auth store
+│   └── gmail_identity.py  # User identity & SQLite store
 ├── analytics/
-│   └── usage_metrics.py   # Anonymous usage tracking (SQLite)
+│   └── usage_metrics.py   # Anonymous usage tracking
 ├── app/
-│   └── mcp_app.py         # MCP tool logic & background tasks
-├── entrypoints/
-│   ├── local/
-│   │   └── server.py      # Local stdio launcher
-│   └── deployed/
-│       └── server.py      # Render SSE bridge
+│   ├── mcp_app.py         # MCP tool routing
+│   └── tools/
+│       ├── indexing.py    # Lifecycle tools
+│       ├── analysis.py    # Context retrieval tools
+│       └── generation.py  # Context retrieval tools
 ├── fetcher/
 │   ├── client.py          # GitHub GraphQL logic
 │   └── transform.py       # PR data normalization
-├── storage/
-│   ├── vector_store.py    # ChromaDB & namespace isolation
-│   └── encoder.py         # Embedding generation
-└── inference/
-    ├── providers.py       # Multi-LLM provider handling
-    └── review.py          # RAG-based review orchestration
+└── storage/
+    ├── vector_store.py    # ChromaDB & namespace isolation
+    └── encoder.py         # Local embedding generation
 ```
 
 ---

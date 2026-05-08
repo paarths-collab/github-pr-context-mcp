@@ -64,21 +64,11 @@ def current_user_email() -> str | None:
     return None
 
 def current_user_settings() -> dict:
-    store = identity_store
-    if not store:
-        return {}
+    """Retrieves settings for the current authenticated user (Hosted mode)."""
     email = current_user_email()
-    if not email:
-        return {}
-    return store.get_user_settings(email)
-
-def llm_settings(user_settings: dict[str, str]) -> dict[str, str]:
-    llm: dict[str, str] = {}
-    for key in ("llm_provider", "llm_model", "llm_api_key", "llm_base_url"):
-        value = user_settings.get(key)
-        if value:
-            llm[key] = value
-    return llm
+    if email and identity_store:
+        return identity_store.get_user_settings(email)
+    return {}
 
 def repo_state_key(repo_key: str, namespace: str | None) -> str:
     ns = normalize_namespace(namespace) or "_default"
@@ -98,6 +88,53 @@ def get_state(ctx: Context) -> dict:
         }
     return _sessions[sid]
 
+import subprocess
+
+def detect_repo_from_git(path: str | None = None) -> str | None:
+    """Detect owner/repo from git remote origin in the given path or CWD."""
+    try:
+        cwd = os.path.dirname(path) if path and os.path.isfile(path) else (path or os.getcwd())
+        if not os.path.exists(cwd):
+            return None
+
+        # Check if git is even installed
+        try:
+            subprocess.run(["git", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Git not found, fall back silently
+            return None
+
+        # Check if we are in a git repo
+        try:
+            subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except subprocess.CalledProcessError:
+            # Not a git repo
+            return None
+
+        output = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            cwd=cwd,
+            stderr=subprocess.DEVNULL,
+            timeout=3
+        ).decode().strip()
+        
+        # Handle SSH and HTTPS formats
+        # SSH: git@github.com:owner/repo.git
+        # HTTPS: https://github.com/owner/repo.git
+        if output.endswith(".git"):
+            output = output[:-4]
+        
+        # Capture the last two parts: owner/repo
+        match = re.search(r"(?:github\.com[:/])([^/]+/[^/]+)$", output)
+        if match:
+            return match.group(1)
+            
+    except Exception as e:
+        # Log to stderr to avoid breaking MCP protocol on stdout
+        print(f"[*] Git auto-detection failed for path '{path}': {e}", file=sys.stderr)
+        
+    return None
+
 def resolve_namespace(requested_namespace: str | None, state: dict) -> str | None:
     current_email = current_user_email()
     if AUTH_REQUIRED:
@@ -106,20 +143,61 @@ def resolve_namespace(requested_namespace: str | None, state: dict) -> str | Non
         return normalize_namespace(current_email)
     return normalize_namespace(requested_namespace if requested_namespace is not None else state.get("active_namespace"))
 
-def resolve_repo(repo: str | None, state: dict) -> str:
+def resolve_repo(repo: str | None, state: dict, file_path: str | None = None) -> str:
+    """
+    Resolve repo with fallback chain:
+    1. Explicit 'repo' argument
+    2. Auto-detected repo from 'file_path' (multi-repo workspace support)
+    3. Active repo in session state
+    4. Auto-detected repo from CWD
+    """
     if repo:
         return normalize_repo(repo)
+    
+    if file_path:
+        detected = detect_repo_from_git(file_path)
+        if detected:
+            return normalize_repo(detected)
+
     active = state.get("active_repo")
-    if not active:
-        raise ValueError("No repo specified and no active repo set. Use ensure_repo_ready first, or pass repo explicitly.")
-    return normalize_repo(active)
+    if active:
+        return normalize_repo(active)
+    
+    detected_cwd = detect_repo_from_git()
+    if detected_cwd:
+        # Side effect: set active repo if detected from CWD to help future calls
+        state["active_repo"] = detected_cwd
+        return normalize_repo(detected_cwd)
+
+    raise ValueError(
+        "Could not determine repository. Please specify 'repo' explicitly (owner/name) "
+        "or ensure you are running in a git repository with an 'origin' remote."
+    )
 
 def is_temporary(repo_key: str, namespace: str | None, state: dict) -> bool:
     key = repo_state_key(repo_key, namespace)
     known = state["storage_types"].get(key)
+    is_temp = False
+    
     if known is not None:
-        return known == "temporary"
-    return repo_is_indexed_temporarily(repo_key, namespace=namespace)
+        is_temp = (known == "temporary")
+    else:
+        is_temp = repo_is_indexed_temporarily(repo_key, namespace=namespace)
+
+    if is_temp:
+        # Update LRU (Item 10)
+        lru = state.setdefault("temp_lru", [])
+        if repo_key in lru:
+            lru.remove(repo_key)
+        lru.append(repo_key)
+        
+        if len(lru) > 5:
+            from storage import delete_repo_index
+            oldest = lru.pop(0)
+            print(f"[*] LRU Eviction: Deleting oldest temp repo index: {oldest}", file=sys.stderr)
+            delete_repo_index(oldest, storage="temporary", namespace=namespace)
+            
+    return is_temp
 
 def namespace_text(namespace: str | None) -> str:
     if namespace:

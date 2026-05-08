@@ -21,6 +21,8 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "type": "pr_description",
                 "pr_number": pr_num,
                 "author": pr["author"],
+                "author_is_bot": pr.get("author_is_bot", False),
+                "touches_ci": pr.get("touches_ci", False),
                 "files": json.dumps([f["path"] for f in pr["files"]]),
             })
             ids.append(f"pr-{pr_num}-desc")
@@ -40,7 +42,9 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "pr_number": pr_num,
                 "file": comment["file"],
                 "author": comment["author"],
+                "is_bot": comment.get("is_bot", False),
                 "resolved": comment["resolved"],
+                "touches_ci": pr.get("touches_ci", False),
             })
             ids.append(f"pr-{pr_num}-comment-{i}")
 
@@ -52,6 +56,7 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
             metadatas.append({
                 "type": "commit_message",
                 "pr_number": pr_num,
+                "touches_ci": pr.get("touches_ci", False),
             })
             ids.append(f"pr-{pr_num}-commit-{i}")
 
@@ -68,6 +73,8 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "pr_number": pr_num,
                 "state": review["state"],
                 "author": review["author"],
+                "is_bot": comment.get("is_bot", False), # Approximation
+                "touches_ci": pr.get("touches_ci", False),
             })
             ids.append(f"pr-{pr_num}-review-{i}")
 

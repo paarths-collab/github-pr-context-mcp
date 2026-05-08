@@ -1,30 +1,23 @@
-# GitHub PR Review Context MCP
+# GitHub PR Review Context MCP (v0.3.0)
+<!-- mcp-name: io.github.paarths-collab/github-pr-context-mcp -->
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.2.9-green)
-![Downloads](https://img.shields.io/badge/downloads-1.5k+-blue)
+![Version](https://img.shields.io/badge/version-0.2.10-green)
+![Architecture](https://img.shields.io/badge/Architecture-Pure--Context-blue)
 
-> [!IMPORTANT]
-> **NEW RELEASE (v0.2.9):** Integrated advanced AI tools for Test Generation, Security Auditing, Static Analysis, and Refactoring suggestions grounded in your repo history.
-> ```bash
-> pipx upgrade github-pr-context-mcp
-> # OR
-> uvx --upgrade github-pr-context-mcp
-> ```
-
-**Context layer for AI code review, grounded in your repository's real pull request history.**
+**A high-performance "Pure Context" engine for AI code review, providing raw historical PR data directly to your IDE agent.**
 
 ---
 
-## ❤️ Community Feedback
-We want to hear from you! Your reviews help us improve and reach more developers.
+## ⚡ Pure Context Model (v0.2.10)
 
-👉 [**Write a Review / Share your Experience**](https://forms.gle/pEnwgcU8NXGhqKeH6)
+This server has been refactored into a **Pure Context Engine**.
 
-*"This MCP is like having a teammate with perfect memory of every PR ever written."* — Example Review
-
----
+Unlike traditional RAG servers that handle inference internally, this server **offloads all reasoning and code generation to your IDE agent** (Cursor, Claude, Windsurf, etc.). This ensures:
+1. **No External LLM Costs**: The server doesn't need your Groq/Cerebras/OpenAI keys.
+2. **Maximum Intelligence**: You use the full power of your IDE's frontier model to process the raw repository history.
+3. **Privacy**: Reasoning happens inside your agent's context window, not on an external server.
 
 ---
 
@@ -32,13 +25,13 @@ We want to hear from you! Your reviews help us improve and reach more developers
 
 GitHub PR Review Context MCP gives AI assistants institutional review memory.
 
-Instead of generic feedback, reviews are informed by historical reviewer comments, recurring quality patterns, and repository-specific standards from your own PR history.
+It fetches your repository's PR history (descriptions, review threads, comments), transforms them into searchable documents, and provides high-density **Context Materials** to your IDE agent.
 
 ### Core Value
 
-- Improves review consistency across teams and repositories.
-- Reduces repeated reviewer feedback on known issues.
-- Integrates with any MCP-compatible client and multiple LLM providers.
+- **Historical Evidence**: Tools return raw JSON "historical facts" (what reviewers cared about in the past).
+- **Team Alignment**: Your IDE agent uses this evidence to match your team's specific standards and architectural patterns.
+- **High Performance**: Optimized for fast retrieval and background indexing to prevent tool timeouts.
 
 ---
 
@@ -46,162 +39,63 @@ Instead of generic feedback, reviews are informed by historical reviewer comment
 
 | Capability | What It Delivers |
 |---|---|
-| Historical review retrieval | Semantic search across prior PR comments and review summaries |
-| Context-aware AI review | Feedback grounded in repository-specific review behavior |
-| Grounded code generation | Generate new code based on past commits, comments, and style |
-| **Team rules generation** | **Auto-generate .cursorrules / CLAUDE.md from repo history** |
-| Smart repository readiness | Auto-detect indexed state and index on demand |
-| Flexible storage modes | Permanent (disk) and temporary (in-memory) indexing options |
-| Portable inference layer | Switch LLM providers using environment configuration only |
+| **Historical Retrieval** | Semantic search across prior PR comments and review summaries. |
+| **Code Review Material** | Raw JSON context for the agent to perform grounded code reviews. |
+| **Rules Material** | High-density data for the agent to synthesize `.cursorrules` or `CLAUDE.md`. |
+| **Grounded Generation** | Context materials for generating code that matches team style. |
+| **Namespace Isolation** | Strict isolation between users/teams using Gmail-based identity. |
 
 ---
 
 ## 🚀 Quick Start
 
-### 🚀 Zero-Setup (uvx / pipx / npx)
+### 🚀 Recommended Installation (uvx / pipx)
 
-The fastest way to use the server. No cloning required. Just run one of these commands directly in your terminal or use them in your IDE's MCP settings:
-
-> [!TIP]
-> **Don't clone this repo to get AI rules!**
-> Once installed, run `generate_repo_rules` inside **YOUR** project to automatically create `.cursorrules` or `CLAUDE.md` tailored to your own team's PR history.
-
-**Using uvx (Recommended for speed):**
 ```bash
+# Run instantly
 uvx github-pr-context-mcp
-```
 
-**Using pipx (Recommended for stability):**
-```bash
-pipx run github-pr-context-mcp
-# Or install permanently:
+# OR Install permanently
 pipx install github-pr-context-mcp
 ```
 
-**Using npx (Smithery bridge):**
-```bash
-npx -y @smithery/cli run github-pr-context-mcp
-```
+### 🛠️ Configuration
+
+The only required configuration is your GitHub token.
+
+**Environment Variable:**
+`GITHUB_TOKEN=ghp_your_token_here`
 
 ---
 
-### ⚠️ Manual Installation (Git Clone / Advanced)
+## 🧰 Tools Reference (Pure Context)
 
-> [!WARNING]
-> Running from a git clone is **only recommended for developers** contributing to this project. For general use, please use the `pipx` method above.
+The server provides tools that return **raw JSON context objects**. The IDE agent then uses its own intelligence to process this data.
 
-If you have cloned the repository for development:
-1. Create a virtual environment: `python -m venv .venv`
-2. Activate it and install: `pip install -e .`
-3. Run automatic setup: `python scripts/install_clients.py`
-
-For full configuration (Cursor, Claude Desktop), see the [**Quick Start Guide**](docs/quickstart.md).
-
----
-
-> [!IMPORTANT]
-> **🚀 USE THE OFFICIAL PACKAGE:** This project is now on PyPI.
-> To ensure seamless updates and zero configuration friction, do **NOT** `git clone`.
->
-> **Recommended Install:**
-> ```bash
-> pipx install github-pr-context-mcp
-> ```
-> Or run instantly with: `uvx github-pr-context-mcp`
-
----
-
-## 🛠️ Usage Modes: Solo vs. Team
-
-This MCP server is built to scale from a single machine to an entire engineering organization.
-
-### 👤 Solo Developer (Local Mode)
-
-**Best for:** Privacy, local-first control, and zero hosting costs.
-- **How it works:** Run via `uvx`, `pipx`, or a local git clone.
-- **Storage:** ChromaDB stays on your local machine.
-- **Security:** Your GitHub Token and LLM keys never leave your device.
-- **Setup:** See [Quick Start](docs/quickstart.md#🚀-zero-setup-uvx--pipx--npx).
-
-### 🤝 Team Collaboration (Hosted Mode — UPCOMING)
-
-**Best for:** Scaling team-wide PR standards and centralized infra.
-- **How it works:** One deployment on Render (Coming Soon) shared by the whole team.
-- **Isolation:** Strict **Gmail-based namespace isolation** (driven by SQLite). User A's indexed data is mathematically invisible to User B.
-- **Economics:** Pooled LLM credits and a single shared indexing server.
-- **Setup:** See [Deployment Guide](docs/integrations/deployed.md).
-
-### 🌟 Zero-Friction Setup (Upcoming)
-
-If your team has hosted this MCP on Render, you do **NOT** need to `git clone` or install anything. Just drop this snippet into your IDE:
-
-```json
-"github-pr-context": {
-  "type": "sse",
-  "url": "https://YOUR-RENDER-URL.onrender.com/mcp",
-  "headers": {
-    "Authorization": "Bearer YOUR_TOKEN"
-  }
-}
-```
-
-*That's it.* If your IDE supports native MCP SSE connections, you are immediately connected to the secure Render deployment.
-
----
-
-## 🧰 Core Tools Reference
-
-The server exposes 12 core tools for IDE agents and developers. For a deep dive on when to use each, see the [**Tool Strategy Guide**](docs/tools_strategy.md).
-
-| Tool | Action |
-|---|---|
-| `ensure_repo_ready` | Index a repo and ensure it's ready for queries |
-| `generate_repo_rules` | **Synthesize .cursorrules / CLAUDE.md from PR history** |
-| `generate_code_from_history` | Write code grounded in past commits & team style |
-| `review_code_with_history` | Perform AI review grounded in team review memory |
-| `generate_tests` | **Generate unit tests matching repository style** |
-| `static_analysis` | **Perform human-like static analysis based on history** |
-| `suggest_refactors` | **Get refactoring ideas based on clean code patterns** |
-| `document_changes` | **Auto-generate documentation / docstrings** |
-| `security_check` | **Audit code for vulnerabilities & compliance** |
-| `get_team_review_patterns` | Summarize recurring team standards |
-| `semantic_search_reviews` | Search past PR comments by meaning |
-| `list_indexed_repos` | View all repos currently in storage |
-| `delete_repo_index` | Free up disk space by clearing repository indices |
-| `get_index_stats` | Verify if a repo index is complete |
-| `get_usage_stats` | View adoption metrics and unique user counts |
-
-<img src="assets/mcp.png" width="800" alt="GitHub PR Context MCP Tools">
+| Tool | Action | typical Use Case |
+|---|---|---|
+| `ensure_repo_ready` | Index a repo and ensure it's ready. | Onboarding a new repository. |
+| `review_code_with_history` | Get historical review material for a snippet. | "Review this code based on team history." |
+| `get_repo_rules_material` | Get material to write `.cursorrules`. | "Write a rules file for this repo." |
+| `get_team_review_patterns` | Get raw patterns for summarization. | "What are the common review themes?" |
+| `generate_code_from_history` | Get context for grounded generation. | "Write this feature in our team's style." |
+| `semantic_search_reviews` | Search past PR comments by meaning. | Manual history lookup. |
+| `list_indexed_repos` | View all currently indexed repositories. | Storage management. |
 
 ---
 
 ## 📖 Documentation
 
-Detailed guides for deep dives and specific configurations:
-
-- 🛠️ [**Quick Start & Usage**](docs/quickstart.md) — Setup and basic commands.
-- ⚙️ [**LLM Configuration**](docs/llm-configuration.md) — Switching between OpenAI, Anthropic, Gemini, and Cerebras.
-- 🧩 [**Tool Strategy & Selection Guide**](docs/tools_strategy.md) — When to use which tool (for humans and agents).
-- 🏗️ [**Architecture & Pipeline**](docs/architecture.md) — How the RAG engine and indexing work.
-- 🔌 [**Integrations**](docs/integrations/index.md) — Connecting to Cursor, Claude Desktop, and more.
-
----
-
-## 🛠️ Troubleshooting
-
-- **"command not found"**: Use absolute paths in your configuration. Run `github-pr-context-mcp config` to get your exact path.
-- **"PermissionError: [WinError 32]"**: The binary is locked by a running process. Close Claude/Cursor, run `taskkill /F /IM github-pr-context-mcp.exe`, then retry the upgrade.
-- **Rate Limit Errors**: Ensure your `GITHUB_TOKEN` is valid and has `repo` scope.
+- 🏗️ [**Architecture & Pipeline**](docs/architecture.md) — How the Pure Context engine works.
+- 🛠️ [**Quick Start Guide**](docs/quickstart.md) — Detailed setup instructions.
+- 🚀 [**Roadmap**](docs/roadmap.md) — Future development plans.
 
 ---
 
 ## 📣 Community & Feedback
 
-We want to hear from you — whether you are a solo developer or a team at a large company!
-
 - **Feedback**: Please open an issue or start a discussion if you have ideas or encounter bugs.
-- **Star ⭐**: If this tool saves you time, give it a star! It helps others find the project.
-- **Corporate**: Is your team using this? Join our "Adopters" list by opening a PR to add your team's name.
+- **Star ⭐**: If this tool saves you time, give it a star!
 
 ---
 
