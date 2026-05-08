@@ -1,17 +1,38 @@
-# GitHub PR Review Context MCP
+# 🚀 GitHub PR Context Tools
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
-![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.2.9-green)
-![Downloads](https://img.shields.io/badge/downloads-1.5k+-blue)
+This repository provides two ways to leverage your GitHub PR history in your AI workflows. Choose the tool version that matches your architecture.
 
-> [!IMPORTANT]
-> **NEW RELEASE (v0.2.9):** Integrated advanced AI tools for Test Generation, Security Auditing, Static Analysis, and Refactoring suggestions grounded in your repo history.
-> ```bash
-> pipx upgrade github-pr-context-mcp
-> # OR
-> uvx --upgrade github-pr-context-mcp
-> ```
+---
+
+## 💎 GitHub PR Context (v0.3.0)
+**The Hardened Pure Context Retrieval Engine.**
+
+Designed for users who want maximum speed and reliability by offloading reasoning to their IDE agent (Cursor, Claude Desktop, Windsurf). It focuses exclusively on high-performance retrieval and data pruning.
+
+### ✨ Key Features (v0.3.0):
+- **Asynchronous Hardening**: Built with `tenacity` retries and non-blocking I/O for heavy repository indexing.
+- **Optimized for IDE Agents**: Prunes redundant metadata and strips useless fields to save token space in your prompt.
+- **Modern Infrastructure**: Uses SQLite-backed cursors for progress tracking and global thread locks for data safety.
+- **Pure Context**: No built-in LLM dependencies; feeds raw, high-quality historical patterns directly to your primary agent.
+
+### 🛠 Installation
+```bash
+pipx install github-pr-context-mcp
+```
+
+---
+
+## 🏛 Legacy Context Agent (v0.2.9)
+**The Original "All-in-One" Inference Agent.**
+
+Use this version if you still rely on the server's internal LLM provider logic (OpenAI/Anthropic keys configured in the server).
+
+### 🛠 Installation
+```bash
+pipx install github-pr-context-mcp==0.2.9
+```
+
+---
 
 **Context layer for AI code review, grounded in your repository's real pull request history.**
 
