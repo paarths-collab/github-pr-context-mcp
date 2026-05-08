@@ -1,11 +1,8 @@
-mcp
-chromadb
-sentence-transformers
-python-dotenv
-requests
-
-# ── LLM Provider (install only the one you use) ───────────────────────────────
-cerebras-cloud-sdk    # default — fastest, free tier at cloud.cerebras.ai
-openai              # for OpenAI, Groq, or Ollama (all OpenAI-compatible)
-anthropic           # for Claude models
-google-generativeai # for Gemini models
+mcp==0.2.1
+chromadb==0.5.0
+sentence-transformers==2.7.0
+python-dotenv==1.0.1
+requests==2.31.0
+tenacity==8.2.3
+httpx==0.27.0
+pytest==8.2.0

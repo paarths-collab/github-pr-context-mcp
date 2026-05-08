@@ -1,194 +1,347 @@
 import json
+import asyncio
 from mcp.server.fastmcp import Context
-from inference import (
-    review_with_context,
-    summarize_patterns,
-    generate_tests_with_context,
-    static_analysis_review,
-    suggest_refactors,
-    document_code_changes,
-    security_audit_with_context
-)
-from storage import query_similar
-from app.state import (
-    resolve_namespace,
-    get_state,
-    current_user_settings,
-    track_usage,
-    resolve_repo,
-    is_temporary,
-    llm_settings
-)
+from storage import query_similar, get_collection_stats
+
+async def _get_stale_warning(repo_key: str, temporary: bool, namespace: str | None) -> str | None:
+    """Check if the index is stale and return a warning string if so."""
+    stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=temporary, namespace=namespace)
+    if stats.get("is_stale"):
+        days = stats.get("days_old", 30)
+        return f"Index is {days} days old. We recommend running 'ensure_repo_ready' to refresh patterns."
+    return None
 
 def register_analysis_tools(mcp):
     @mcp.tool(name="semantic_search_reviews")
-    def semantic_search_reviews(
+    async def semantic_search_reviews(
         query: str,
         repo: str | None = None,
-        n_results: int = 8,
+        n_results: int = 15,
+        only_ci: bool = False,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Search past review comments semantically."""
+        """
+        Search past review comments semantically.
+        Use 'only_ci=True' to filter for PRs that touched CI/CD files (Workflows, Docker, etc).
+        Returns raw context snippets for the IDE agent to analyze.
+        """
         if ctx is None:
             raise ValueError("Context is required")
 
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "semantic_search_reviews")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
 
-        results = query_similar(
+        where = {"touches_ci": True} if only_ci else None
+
+        results = await asyncio.to_thread(
+            query_similar,
             repo_key,
             query,
             n_results=n_results,
             temporary=temporary,
             namespace=namespace,
+            where=where,
         )
-        return json.dumps(results, indent=2)
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {"results": results}
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
-    @mcp.tool(name="review_code_with_history")
-    def review_code_with_history(
-        code: str,
+    @mcp.tool(name="find_similar_errors")
+    async def find_similar_errors(
+        error_message: str,
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Perform code review grounded in historical PR review context."""
+        """
+        Search for past PRs where reviewers discussed a similar error message or stack trace.
+        High value for engineering managers diagnosing recurring production or CI failures.
+        """
+        if ctx is None:
+            raise ValueError("Context is required")
+
+        state = get_state(ctx)
+        namespace = resolve_namespace(namespace, state)
+        track_usage(ctx, namespace, "find_similar_errors")
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
+        temporary = is_temporary(repo_key, namespace, state)
+
+        results = await asyncio.to_thread(
+            query_similar,
+            repo_key,
+            error_message,
+            n_results=10,
+            temporary=temporary,
+            namespace=namespace,
+        )
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "error_query": error_message,
+            "similar_historical_discussions": results,
+            "instruction": "Analyze these historical discussions to see if this error has a known root cause or previously accepted fix."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
+
+    @mcp.tool(name="review_code_with_history")
+    async def review_code_with_history(
+        code: str,
+        repo: str | None = None,
+        only_ci: bool = False,
+        namespace: str | None = None,
+        file_path: str | None = None,
+        ctx: Context | None = None,
+    ) -> str:
+        """
+        Retrieve historical review context relevant to a code snippet.
+        The IDE agent should use these snippets to perform a grounded code review.
+        Use 'only_ci=True' to focus on PRs that touched CI/CD files.
+        """
         if ctx is None:
             raise ValueError("Context is required")
 
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "review_code_with_history")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
 
-        user_settings = current_user_settings()
-        context = query_similar(
+        where = {"touches_ci": True} if only_ci else None
+
+        context = await asyncio.to_thread(
+            query_similar,
             repo_key,
             code,
-            n_results=10,
+            n_results=12,
             temporary=temporary,
             namespace=namespace,
+            where=where,
         )
-        return review_with_context(code, context, repo_key, settings=llm_settings(user_settings))
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "task": "code_review",
+            "historical_context": context,
+            "instruction": "Analyze the provided code using these historical review patterns. Highlight any deviations from team standards."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
     @mcp.tool(name="get_team_review_patterns")
-    def get_team_review_patterns(
-        topic: str = "general code quality",
+    async def get_team_review_patterns(
+        topic: str = "general code quality architecture",
         repo: str | None = None,
+        only_ci: bool = False,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Summarize recurring review patterns for a repo."""
+        """
+        Retrieve recurring historical review patterns for a repository.
+        The IDE agent should summarize these into actionable team standards.
+        Use 'only_ci=True' to focus on historical CI/CD standards.
+        """
         if ctx is None:
             raise ValueError("Context is required")
 
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "get_team_review_patterns")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
 
-        user_settings = current_user_settings()
-        context = query_similar(
+        where = {"touches_ci": True} if only_ci else None
+
+        context = await asyncio.to_thread(
+            query_similar,
             repo_key,
             topic,
-            n_results=20,
+            n_results=25,
             temporary=temporary,
             namespace=namespace,
+            where=where,
         )
-        return summarize_patterns(context, repo_key, settings=llm_settings(user_settings))
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "topic": topic,
+            "patterns": context,
+            "instruction": "Summarize these historical comments into a list of recurring review patterns and team standards."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
     @mcp.tool(name="generate_tests")
-    def generate_tests(
+    async def generate_tests(
         code: str,
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Generate unit tests grounded in repository's testing style."""
+        """
+        Retrieve historical testing patterns relevant to the provided code.
+        The IDE agent should generate tests that match this repository's style.
+        """
         if ctx is None: raise ValueError("Context is required")
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "generate_tests")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
-        user_settings = current_user_settings()
-        context = query_similar(repo_key, "unit testing integration mock fixtures", n_results=10, temporary=temporary, namespace=namespace)
-        return generate_tests_with_context(code, context, repo_key, settings=llm_settings(user_settings))
+        
+        context = await asyncio.to_thread(
+            query_similar,
+            repo_key, 
+            "unit testing integration mock fixtures assert", 
+            n_results=12, 
+            temporary=temporary, 
+            namespace=namespace
+        )
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "testing_history": context,
+            "instruction": "Generate unit tests for the provided code, following the patterns found in the testing history."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
     @mcp.tool(name="static_analysis")
-    def static_analysis(
+    async def static_analysis(
         code: str,
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Perform a human-like static analysis based on historical review feedback."""
+        """
+        Retrieve historical linting and style feedback for a repository.
+        The IDE agent should perform a manual 'human-like' check based on these patterns.
+        """
         if ctx is None: raise ValueError("Context is required")
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "static_analysis")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
-        user_settings = current_user_settings()
-        context = query_similar(repo_key, "lint style nit readability clean code", n_results=10, temporary=temporary, namespace=namespace)
-        return static_analysis_review(code, context, repo_key, settings=llm_settings(user_settings))
+        
+        context = await asyncio.to_thread(
+            query_similar,
+            repo_key, 
+            "lint style nit readability clean code formatting", 
+            n_results=12, 
+            temporary=temporary, 
+            namespace=namespace
+        )
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "style_history": context,
+            "instruction": "Analyze the code for style and readability issues that match the types of feedback your team has given in the past."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
     @mcp.tool(name="suggest_refactors")
-    def suggest_refactors_tool(
+    async def suggest_refactors_tool(
         code: str,
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Suggest refactorings based on repository's clean code patterns."""
+        """
+        Retrieve historical refactoring feedback from the repository.
+        The IDE agent should suggest improvements grounded in these patterns.
+        """
         if ctx is None: raise ValueError("Context is required")
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "suggest_refactors")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
-        user_settings = current_user_settings()
-        context = query_similar(repo_key, "refactor DRY modularity performance", n_results=10, temporary=temporary, namespace=namespace)
-        return suggest_refactors(code, context, repo_key, settings=llm_settings(user_settings))
-
-    @mcp.tool(name="document_changes")
-    def document_changes(
-        code: str,
-        repo: str | None = None,
-        namespace: str | None = None,
-        ctx: Context | None = None,
-    ) -> str:
-        """Generate documentation matching the team's style."""
-        if ctx is None: raise ValueError("Context is required")
-        state = get_state(ctx)
-        namespace = resolve_namespace(namespace, state)
-        track_usage(ctx, namespace, "document_changes")
-        repo_key = resolve_repo(repo, state)
-        temporary = is_temporary(repo_key, namespace, state)
-        user_settings = current_user_settings()
-        context = query_similar(repo_key, "docstring comment README documentation", n_results=10, temporary=temporary, namespace=namespace)
-        return document_code_changes(code, context, repo_key, settings=llm_settings(user_settings))
+        
+        context = await asyncio.to_thread(
+            query_similar,
+            repo_key, 
+            "refactor DRY modularity performance complexity abstraction", 
+            n_results=12, 
+            temporary=temporary, 
+            namespace=namespace
+        )
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "refactor_history": context,
+            "instruction": "Suggest refactoring improvements for the provided code based on how the team has handled similar complexity in the past."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)
 
     @mcp.tool(name="security_check")
-    def security_check(
+    async def security_check(
         code: str,
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Check code for security vulnerabilities and compliance issues."""
+        """
+        Retrieve historical security feedback and vulnerability discussions.
+        The IDE agent should audit the code for similar risks.
+        """
         if ctx is None: raise ValueError("Context is required")
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "security_check")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
-        user_settings = current_user_settings()
-        # Query for past security-related feedback
-        context = query_similar(repo_key, "security vulnerability injection sanitization auth", n_results=10, temporary=temporary, namespace=namespace)
-        return security_audit_with_context(code, context, repo_key, settings=llm_settings(user_settings))
+        
+        context = await asyncio.to_thread(
+            query_similar,
+            repo_key, 
+            "security vulnerability injection sanitization auth encryption", 
+            n_results=15, 
+            temporary=temporary, 
+            namespace=namespace
+        )
+        
+        warning = await _get_stale_warning(repo_key, temporary, namespace)
+        response = {
+            "repo": repo_key,
+            "security_history": context,
+            "instruction": "Audit the provided code for security vulnerabilities, paying close attention to patterns flagged in previous reviews."
+        }
+        if warning:
+            response["warning"] = warning
+            
+        return json.dumps(response, indent=2)

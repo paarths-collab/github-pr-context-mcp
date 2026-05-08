@@ -1,5 +1,8 @@
 import sys
+import asyncio
 import threading
+import os
+import json
 from mcp.server.fastmcp import Context
 from app.state import is_temporary
 from fetcher import fetch_prs
@@ -10,6 +13,7 @@ from storage import (
     list_all_repos,
     repo_is_indexed_permanently,
     repo_is_indexed_temporarily,
+    get_max_pr_number,
 )
 from app.state import (
     normalize_repo,
@@ -18,7 +22,6 @@ from app.state import (
     repo_state_key,
     get_state,
     namespace_text,
-    current_user_settings,
     track_usage,
     resolve_repo
 )
@@ -39,8 +42,8 @@ Temporary storage
 
 def register_indexing_tools(mcp):
     @mcp.tool(name="ensure_repo_ready")
-    def ensure_repo_ready(
-        repo: str,
+    async def ensure_repo_ready(
+        repo: str | None = None,
         storage: str | None = None,
         pages: int = 2,
         namespace: str | None = None,
@@ -51,16 +54,21 @@ def register_indexing_tools(mcp):
             raise ValueError("Context is required")
 
         state = get_state(ctx)
-        repo_key = normalize_repo(repo)
+        # Handle case where repo is missing by trying to detect it from CWD
+        try:
+            repo_key = await asyncio.to_thread(resolve_repo, repo, state)
+        except ValueError as e:
+            return str(e)
+
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "ensure_repo_ready")
         state_key = repo_state_key(repo_key, namespace)
 
-        if repo_is_indexed_permanently(repo_key, namespace=namespace):
+        if await asyncio.to_thread(repo_is_indexed_permanently, repo_key, namespace=namespace):
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "permanent"
-            stats = get_collection_stats(repo_key, temporary=False, namespace=namespace)
+            stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=False, namespace=namespace)
             return (
                 f"{repo_key} is already indexed permanently on disk.\n"
                 f"{stats['total_documents']} documents loaded and ready.\n"
@@ -68,11 +76,11 @@ def register_indexing_tools(mcp):
                 f"{namespace_text(namespace)}"
             )
 
-        if repo_is_indexed_temporarily(repo_key, namespace=namespace):
+        if await asyncio.to_thread(repo_is_indexed_temporarily, repo_key, namespace=namespace):
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "temporary"
-            stats = get_collection_stats(repo_key, temporary=True, namespace=namespace)
+            stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=True, namespace=namespace)
             return (
                 f"{repo_key} is already indexed in memory.\n"
                 f"{stats['total_documents']} documents loaded and ready.\n"
@@ -93,24 +101,46 @@ def register_indexing_tools(mcp):
             raise ValueError("storage must be one of: temporary, permanent")
 
         temporary = storage == "temporary"
-        user_settings = current_user_settings()
-        
-        def _background_index():
+
+        async def _run_indexing():
             try:
-                prs = fetch_prs(
+                # Find current checkpoint (blocking storage call)
+                since_pr = await asyncio.to_thread(get_max_pr_number, repo_key, temporary=temporary, namespace=namespace)
+                
+                msg = f"incremental update since PR #{since_pr}" if since_pr else "full index"
+                print(f"[*] Starting background indexing for {repo_key} ({msg})...", file=sys.stderr)
+                
+                # Native async fetch (Item 1 conversion)
+                prs = await fetch_prs(
                     *repo_key.split("/", 1),
                     pages=pages,
-                    github_token=user_settings.get("github_token"),
+                    github_token=os.getenv("GITHUB_TOKEN"),
+                    since_pr_number=since_pr
                 )
-                count = index_prs(repo_key, prs, temporary=temporary, namespace=namespace)
+                
+                if not prs:
+                    print(f"[+] No new PRs found for {repo_key}. Already up to date.", file=sys.stderr)
+                    state["active_repo"] = repo_key
+                    state["active_namespace"] = namespace
+                    return
+
+                # Blocking storage call
+                count = await asyncio.to_thread(
+                    index_prs,
+                    repo_key,
+                    prs,
+                    temporary=temporary,
+                    namespace=namespace
+                )
                 state["active_repo"] = repo_key
                 state["active_namespace"] = namespace
                 state["storage_types"][state_key] = storage
-                print(f"Background indexing finished for {repo_key}. {count} docs parsed.", file=sys.stderr)
+                print(f"[+] Background indexing finished for {repo_key}. {count} docs parsed.", file=sys.stderr)
             except Exception as e:
-                print(f"Background indexing failed for {repo_key}: {e}", file=sys.stderr)
+                print(f"[!] Background indexing failed for {repo_key}: {e}", file=sys.stderr)
 
-        threading.Thread(target=_background_index, daemon=True).start()
+        # Use create_task to fire and forget the indexing
+        asyncio.create_task(_run_indexing())
 
         storage_label = "temporary (in-memory)" if temporary else "permanent (disk)"
         return (
@@ -121,7 +151,7 @@ def register_indexing_tools(mcp):
         )
 
     @mcp.tool(name="set_active_repo")
-    def set_active_repo(repo: str, namespace: str | None = None, ctx: Context | None = None) -> str:
+    async def set_active_repo(repo: str, namespace: str | None = None, ctx: Context | None = None) -> str:
         """Switch the active repo to an already-indexed repo."""
         if ctx is None:
             raise ValueError("Context is required")
@@ -131,11 +161,11 @@ def register_indexing_tools(mcp):
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "set_active_repo")
 
-        if not repo_is_indexed_permanently(repo_key, namespace=namespace) and not repo_is_indexed_temporarily(repo_key, namespace=namespace):
+        if not await asyncio.to_thread(repo_is_indexed_permanently, repo_key, namespace=namespace) and not await asyncio.to_thread(repo_is_indexed_temporarily, repo_key, namespace=namespace):
             return f"{repo_key} is not indexed yet. Use ensure_repo_ready first."
 
         state_key = repo_state_key(repo_key, namespace)
-        if repo_is_indexed_temporarily(repo_key, namespace=namespace):
+        if await asyncio.to_thread(repo_is_indexed_temporarily, repo_key, namespace=namespace):
             state["storage_types"][state_key] = "temporary"
         else:
             state["storage_types"][state_key] = "permanent"
@@ -152,7 +182,7 @@ def register_indexing_tools(mcp):
         return msg
 
     @mcp.tool(name="list_indexed_repos")
-    def list_indexed_repos(namespace: str | None = None, ctx: Context | None = None) -> str:
+    async def list_indexed_repos(namespace: str | None = None, ctx: Context | None = None) -> str:
         """List indexed repos with storage type and document count."""
         if ctx is None:
             raise ValueError("Context is required")
@@ -160,7 +190,7 @@ def register_indexing_tools(mcp):
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "list_indexed_repos")
-        rows = list_all_repos(namespace=namespace)
+        rows = await asyncio.to_thread(list_all_repos, namespace=namespace)
         if not rows:
             return "No repos indexed yet."
 
@@ -180,7 +210,7 @@ def register_indexing_tools(mcp):
         return "\n".join(lines)
 
     @mcp.tool(name="delete_repo_index")
-    def delete_repo_index(
+    async def delete_repo_index(
         repo: str,
         storage: str = "both",
         namespace: str | None = None,
@@ -195,7 +225,7 @@ def register_indexing_tools(mcp):
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "delete_repo_index")
 
-        result = delete_repo_index_storage(repo_key, storage=storage, namespace=namespace)
+        result = await asyncio.to_thread(delete_repo_index_storage, repo_key, storage=storage, namespace=namespace)
         if not result["deleted_any"]:
             return f"No index found for {repo_key}{namespace_text(namespace)} in storage scope: {storage}."
 
@@ -220,9 +250,10 @@ def register_indexing_tools(mcp):
         )
 
     @mcp.tool(name="get_index_stats")
-    def get_index_stats(
+    async def get_index_stats(
         repo: str | None = None,
         namespace: str | None = None,
+        file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
         """Return indexed document count and storage scope for the selected repo."""
@@ -232,9 +263,8 @@ def register_indexing_tools(mcp):
         state = get_state(ctx)
         namespace = resolve_namespace(namespace, state)
         track_usage(ctx, namespace, "get_index_stats")
-        repo_key = resolve_repo(repo, state)
+        repo_key = await asyncio.to_thread(resolve_repo, repo, state, file_path=file_path)
         temporary = is_temporary(repo_key, namespace, state)
 
-        import json
-        stats = get_collection_stats(repo_key, temporary=temporary, namespace=namespace)
+        stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=temporary, namespace=namespace)
         return json.dumps(stats, indent=2)

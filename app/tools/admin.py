@@ -1,4 +1,5 @@
 import json
+import asyncio
 from mcp.server.fastmcp import Context
 from starlette.responses import JSONResponse
 from app.state import (
@@ -11,7 +12,7 @@ from app.state import (
 
 def register_admin_tools(mcp):
     @mcp.tool(name="update_settings")
-    def update_settings(
+    async def update_settings(
         github_token: str | None = None,
         llm_provider: str | None = None,
         llm_model: str | None = None,
@@ -39,13 +40,13 @@ def register_admin_tools(mcp):
             return "No settings provided to update."
 
         try:
-            identity_store.update_user_settings(email, new_settings)
+            await asyncio.to_thread(identity_store.update_user_settings, email, new_settings)
             return f"Successfully updated your settings: {', '.join(new_settings.keys())}."
         except Exception as e:
             return f"Failed to update settings: {str(e)}"
 
     @mcp.tool(name="get_usage_stats")
-    def get_usage_stats(days: int = 30, admin_token: str | None = None) -> str:
+    async def get_usage_stats(days: int = 30, admin_token: str | None = None) -> str:
         """Return anonymous usage metrics (tool calls, unique users, top tools)."""
         if usage_store is None:
             return json.dumps({"enabled": False, "reason": "USAGE_TRACKING_ENABLED=false"}, indent=2)
@@ -54,4 +55,5 @@ def register_admin_tools(mcp):
             return "Unauthorized: provide a valid admin_token."
 
         days = max(1, min(days, 365))
-        return json.dumps(usage_store.summary(last_days=days), indent=2)
+        stats = await asyncio.to_thread(usage_store.summary, last_days=days)
+        return json.dumps(stats, indent=2)

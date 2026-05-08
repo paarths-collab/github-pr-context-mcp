@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import json
 import os
 import platform
 import sys
@@ -122,8 +123,6 @@ Tools Overview:
 
 Configuration (Environment Variables):
   - GITHUB_TOKEN: (Required) Personal Access Token with 'repo' scope.
-  - LLM_PROVIDER: (Optional) cerebras|openai|anthropic|gemini|ollama (default: cerebras).
-  - LLM_API_KEY: (Optional) API key for your chosen provider.
   - CHROMA_PERSIST_DIR: (Optional) Custom path for persistent storage (default: ~/.github-pr-mcp/chroma_db).
   - TELEMETRY: (Optional) set to 'false' to opt-out of anonymous usage pings.
 
@@ -138,9 +137,7 @@ Example Usage (Claude Desktop Config):
     "github-pr-context": {
       "command": "github-pr-context-mcp",
       "env": {
-        "GITHUB_TOKEN": "your_github_token_here",
-        "LLM_PROVIDER": "anthropic",
-        "LLM_API_KEY": "your_anthropic_key_here"
+        "GITHUB_TOKEN": "your_github_token_here"
       }
     }
   }
@@ -223,37 +220,35 @@ Troubleshooting (JSON for AI Agents):
     args = parser.parse_args()
 
     if args.command == "config":
-        import json
-        import sys
-        
         # Detect absolute path of the current binary/script
         abs_path = os.path.abspath(sys.argv[0])
-        command_val = abs_path
         
-        # If running from source (.py file), prefix with python
+        # If running from source (.py file), use python and script path separately
         if abs_path.endswith(".py"):
-            python_exe = sys.executable
-            command_val = f"{python_exe} {abs_path}"
+            command = sys.executable
+            args_list = [abs_path]
+        else:
+            command = abs_path
+            args_list = []
         
         detected_os = platform.system()
         
         config = {
             "mcpServers": {
                 "github-pr-context": {
-                    "command": command_val,
+                    "command": command,
+                    "args": args_list,
                     "env": {
-                        "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN",
-                        "LLM_PROVIDER": "cerebras",
-                        "LLM_API_KEY": "YOUR_LLM_API_KEY"
+                        "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN"
                     }
                 }
             }
         }
         print(f"\n=== {detected_os.upper()} CONFIG SNIPPET ===", file=sys.stderr)
-        print(f"Detected binary at: {command_val}", file=sys.stderr)
+        print(f"Detected binary at: {abs_path}", file=sys.stderr)
         print("Copy the JSON below into your mcpConfig.json file:", file=sys.stderr)
         print(json.dumps(config, indent=2))
-        print("\nNOTE: Ensure you replace YOUR_GITHUB_TOKEN and YOUR_LLM_API_KEY.\n", file=sys.stderr)
+        print("\nNOTE: Ensure you replace YOUR_GITHUB_TOKEN.\n", file=sys.stderr)
         sys.exit(0)
 
     # Import here so that env vars from IDE env block are set before mcp_app loads

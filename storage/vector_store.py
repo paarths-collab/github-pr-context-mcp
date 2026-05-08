@@ -3,9 +3,10 @@
 
 import chromadb
 import os
-import hashlib
 import re
 import sys
+import threading
+import datetime
 from dotenv import load_dotenv
 from storage.encoder import encode
 from storage.document_builder import build_documents
@@ -21,6 +22,8 @@ _persistent_client = chromadb.PersistentClient(path=PERSIST_DIR)
 # Ephemeral = in-memory only, wiped when the MCP server process stops
 _ephemeral_client = chromadb.EphemeralClient()
 
+_chroma_lock = threading.Lock()
+
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -30,19 +33,10 @@ def _normalize_namespace(namespace: str | None) -> str | None:
     ns = namespace.strip()
     return ns or None
 
-def _safe_namespace(namespace: str | None) -> str | None:
-    ns = _normalize_namespace(namespace)
-    if ns is None:
-        return None
-    # Keep names portable across Chroma backends.
-    return re.sub(r"[^A-Za-z0-9_-]", "-", ns)
-
 def _safe_name(repo_key: str) -> str:
     return repo_key.replace("/", "--")
 
 def _collection_name(repo_key: str, namespace: str | None = None) -> str:
-    # We now strictly use ONE collection per repository to preserve ChromaDB capacity.
-    # User isolation is handled by injecting the namespace into document metadata and applying `where` filters.
     return _safe_name(repo_key)
 
 def _collection_metadata(repo_key: str, namespace: str | None = None) -> dict:
@@ -59,7 +53,6 @@ def _collection_repo(col) -> str:
     meta = col.metadata or {}
     if "repo" in meta:
         return meta["repo"]
-    # Backward compatibility for collections created before metadata tagging.
     return col.name.replace("--", "/")
 
 def _collection_namespace(col) -> str | None:
@@ -127,29 +120,38 @@ def index_prs(
     temporary: bool = False,
     namespace: str | None = None,
 ) -> int:
-    """
-    Embed and store all PR documents.
-    temporary=False → persistent on-disk ChromaDB
-    temporary=True  → ephemeral in-memory (lost on server restart)
-    """
-    collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
-    docs, metadatas, ids = build_documents(prs)
+    with _chroma_lock:
+        collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
+        docs, metadatas, ids = build_documents(prs)
 
-    if not docs:
-        return 0
+        if not docs:
+            return 0
 
-    ns = _normalize_namespace(namespace)
-    for meta in metadatas:
-        if ns:
-            meta["namespace"] = ns
+        ns = _normalize_namespace(namespace)
+        for meta in metadatas:
+            if ns:
+                meta["namespace"] = ns
 
-    embeddings = [encode(doc) for doc in docs]
-    collection.upsert(documents=docs, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        embeddings = [encode(doc) for doc in docs]
+        collection.upsert(documents=docs, embeddings=embeddings, metadatas=metadatas, ids=ids)
+
+        # Update cursor store with highest PR number
+        if prs:
+            max_pr = max(pr.get("number", 0) for pr in prs)
+            if max_pr > 0:
+                from storage.cursor_store import cursor_store
+                cursor_store.set_cursor(repo_key, max_pr, namespace=namespace)
+
+        # Update collection metadata
+        current_meta = collection.metadata or {}
+        current_meta["last_indexed_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        
+        # Filter out immutable keys
+        update_meta = {k: v for k, v in current_meta.items() if k != "hnsw:space"}
+        collection.modify(metadata=update_meta)
 
     label = "temporary (in-memory)" if temporary else "permanent (disk)"
-    ns = _normalize_namespace(namespace)
-    ns_suffix = f", namespace={ns}" if ns else ""
-    print(f"Indexed {len(docs)} documents for {repo_key} [{label}{ns_suffix}]", file=sys.stderr)
+    print(f"Indexed {len(docs)} documents for {repo_key} [{label}]", file=sys.stderr)
     return len(docs)
 
 
@@ -161,22 +163,32 @@ def query_similar(
     n_results: int = 8,
     temporary: bool = False,
     namespace: str | None = None,
+    where: dict | None = None,
 ) -> list[dict]:
-    collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
-    total = collection.count()
-    if total == 0:
-        return []
+    with _chroma_lock:
+        collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
+        total = collection.count()
+        if total == 0:
+            return []
 
-    ns = _normalize_namespace(namespace)
-    where_filter = {"namespace": ns} if ns else None
+        ns = _normalize_namespace(namespace)
+        where_filter = where or {}
+        if ns and "namespace" not in where_filter:
+            where_filter["namespace"] = ns
 
-    # We must explicitly query with a where_filter to isolate queries to this namespace's vectors
-    results = collection.query(
-        query_embeddings=[encode(query_text)],
-        n_results=n_results, # We might get fewer than n_results back, which is fine
-        where=where_filter,
-        include=["documents", "metadatas", "distances"],
-    )
+        # ChromaDB requires multiple filters to be wrapped in $and
+        final_where = None
+        if len(where_filter) == 1:
+            final_where = where_filter
+        elif len(where_filter) > 1:
+            final_where = {"$and": [{k: v} for k, v in where_filter.items()]}
+
+        results = collection.query(
+            query_embeddings=[encode(query_text)],
+            n_results=n_results,
+            where=final_where,
+            include=["documents", "metadatas", "distances"],
+        )
 
     if not results["documents"] or not results["documents"][0]:
         return []
@@ -202,21 +214,39 @@ def get_collection_stats(
     temporary: bool = False,
     namespace: str | None = None,
 ) -> dict:
-    collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
-    ns = _normalize_namespace(namespace)
-    where_filter = {"namespace": ns} if ns else None
-    
-    try:
-        data = collection.get(where=where_filter, include=[])
-        count = len(data["ids"]) if data and "ids" in data else 0
-    except Exception:
-        count = 0
+    with _chroma_lock:
+        collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
+        ns = _normalize_namespace(namespace)
+        where_filter = {"namespace": ns} if ns else None
+        
+        try:
+            data = collection.get(where=where_filter, include=[])
+            count = len(data["ids"]) if data and "ids" in data else 0
+        except Exception:
+            count = 0
+
+        meta = collection.metadata or {}
+        last_indexed = meta.get("last_indexed_at")
+        
+        is_stale = False
+        days_old = None
+        if last_indexed:
+            try:
+                last_dt = datetime.datetime.fromisoformat(last_indexed)
+                delta = datetime.datetime.now(datetime.timezone.utc) - last_dt
+                days_old = delta.days
+                is_stale = days_old > 30
+            except Exception:
+                pass
 
     return {
         "repo": repo_key,
         "namespace": ns,
         "total_documents": count,
         "storage": "temporary" if temporary else "permanent",
+        "last_indexed_at": last_indexed,
+        "days_old": days_old,
+        "is_stale": is_stale,
     }
 
 
@@ -234,36 +264,34 @@ def delete_repo_index(
     ns = _normalize_namespace(namespace)
     where_filter = {"namespace": ns} if ns else None
 
-    deleted = {
-        "temporary": False,
-        "permanent": False,
-    }
+    deleted = {"temporary": False, "permanent": False}
 
-    if storage in {"temporary", "both"}:
-        try:
-            col = _ephemeral_client.get_collection(name)
-            if where_filter:
-                col.delete(where=where_filter)
-            else:
-                _ephemeral_client.delete_collection(name)
-            deleted["temporary"] = True
-        except Exception:
-            pass
+    with _chroma_lock:
+        if storage in {"temporary", "both"}:
+            try:
+                col = _ephemeral_client.get_collection(name)
+                if where_filter:
+                    col.delete(where=where_filter)
+                else:
+                    _ephemeral_client.delete_collection(name)
+                deleted["temporary"] = True
+            except Exception:
+                pass
 
-    if storage in {"permanent", "both"}:
-        try:
-            col = _persistent_client.get_collection(name)
-            if where_filter:
-                col.delete(where=where_filter)
-            else:
-                _persistent_client.delete_collection(name)
-            deleted["permanent"] = True
-        except Exception:
-            pass
+        if storage in {"permanent", "both"}:
+            try:
+                col = _persistent_client.get_collection(name)
+                if where_filter:
+                    col.delete(where=where_filter)
+                else:
+                    _persistent_client.delete_collection(name)
+                deleted["permanent"] = True
+            except Exception:
+                pass
 
     return {
         "repo": repo_key,
-        "namespace": _normalize_namespace(namespace),
+        "namespace": ns,
         "storage": storage,
         "deleted": deleted,
         "deleted_any": any(deleted.values()),
