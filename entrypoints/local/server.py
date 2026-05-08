@@ -110,7 +110,7 @@ def _detect_mode() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="GitHub PR Context MCP Server - Provides historical PR review context for code reviews.",
+        description="GitHub PR Engine - Provides historical PR review context for code reviews.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Tools Overview:

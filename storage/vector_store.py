@@ -196,7 +196,10 @@ def query_similar(
     return [
         {
             "text": doc,
-            "metadata": meta,
+            "metadata": {
+                k: v for k, v in meta.items() 
+                if k not in {"namespace", "files", "author_is_bot", "is_bot"}
+            },
             "similarity": round(1 - dist, 4),
         }
         for doc, meta, dist in zip(

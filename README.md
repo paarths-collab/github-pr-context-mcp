@@ -1,23 +1,51 @@
 # GitHub PR Review Context MCP (v0.3.0)
 <!-- mcp-name: io.github.paarths-collab/github-pr-context-mcp -->
+# 🚀 GitHub PR Context Tools
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
-![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.2.10-green)
-![Architecture](https://img.shields.io/badge/Architecture-Pure--Context-blue)
-
-**A high-performance "Pure Context" engine for AI code review, providing raw historical PR data directly to your IDE agent.**
+This repository provides two ways to leverage your GitHub PR history in your AI workflows. Choose the tool that matches your architecture.
 
 ---
 
-## ⚡ Pure Context Model (v0.2.10)
+## 💎 GitHub PR Context (v0.3.0)
+**The Hardened Pure Context Retrieval Engine.**
 
-This server has been refactored into a **Pure Context Engine**.
+Designed for users who want maximum speed and reliability by offloading reasoning to their IDE agent (Cursor, Claude Desktop, Windsurf). It focuses exclusively on high-performance retrieval and data pruning.
 
-Unlike traditional RAG servers that handle inference internally, this server **offloads all reasoning and code generation to your IDE agent** (Cursor, Claude, Windsurf, etc.). This ensures:
-1. **No External LLM Costs**: The server doesn't need your Groq/Cerebras/OpenAI keys.
-2. **Maximum Intelligence**: You use the full power of your IDE's frontier model to process the raw repository history.
-3. **Privacy**: Reasoning happens inside your agent's context window, not on an external server.
+### ✨ Key Features (v0.3.0):
+- **Asynchronous Hardening**: Built with `tenacity` retries and non-blocking I/O for heavy repository indexing.
+- **Optimized for IDE Agents**: Prunes redundant metadata and strips useless fields to save token space in your prompt.
+- **Modern Infrastructure**: Uses SQLite-backed cursors for progress tracking and global thread locks for data safety.
+- **Pure Context**: No built-in LLM dependencies; feeds raw, high-quality historical patterns directly to your primary agent.
+
+### 🛠 Installation
+```bash
+pipx install github-pr-context-mcp
+```
+
+---
+
+## 🏛 Legacy Context Agent (v0.2.9)
+**The Integrated Reasoning Agent.**
+
+Designed for users who prefer the server to handle LLM inference internally. This version includes the legacy inference layer and supports direct configuration of OpenAI and Anthropic API keys.
+
+### ✨ Key Features (v0.2.9):
+- **Internal Inference**: Can perform analysis and reviews directly using its own configured LLM provider.
+- **All-in-One Logic**: Includes the legacy `inference/` module for direct model interactions.
+- **Proven Stability**: The original stable version of the tool.
+
+### 🛠 Installation
+```bash
+pipx install github-pr-context-mcp==0.2.9
+```
+
+---
+
+## 🛠️ Configuration (v0.3.0)
+The v0.3.0 version only requires a GitHub Token.
+
+**Environment Variable:**
+`GITHUB_TOKEN=ghp_your_token_here`
 
 ---
 
@@ -53,10 +81,10 @@ It fetches your repository's PR history (descriptions, review threads, comments)
 
 ```bash
 # Run instantly
-uvx github-pr-context-mcp
+uvx github-pr-engine
 
 # OR Install permanently
-pipx install github-pr-context-mcp
+pipx install github-pr-engine
 ```
 
 ### 🛠️ Configuration
