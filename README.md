@@ -1,8 +1,11 @@
-# GitHub PR Review Context MCP (v0.3.0)
-<!-- mcp-name: io.github.paarths-collab/github-pr-context-mcp -->
 # 🚀 GitHub PR Context Tools
 
-This repository provides two ways to leverage your GitHub PR history in your AI workflows. Choose the tool that matches your architecture.
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
+![Version](https://img.shields.io/badge/version-0.3.0-green)
+![Downloads](https://img.shields.io/badge/downloads-3k+-blue)
+
+This repository provides two ways to leverage your GitHub PR history in your AI workflows. Choose the tool version that matches your architecture.
 
 ---
 
