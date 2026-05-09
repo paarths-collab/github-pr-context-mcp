@@ -17,10 +17,28 @@ Designed for users who want maximum speed and reliability by offloading reasonin
 - **Modern Infrastructure**: Uses SQLite-backed cursors for progress tracking and global thread locks for data safety.
 - **Pure Context**: No built-in LLM dependencies; feeds raw, high-quality historical patterns directly to your primary agent.
 
-### 🛠 Installation
-```bash
-pipx install github-pr-context-mcp
-```
+### 🛠 Installation (Pre-release Source Install)
+> [!NOTE]
+> **v0.3.0 is currently in pre-release and is not yet live on PyPI.** 
+> To use the hardened v0.3.0 engine today, you must install it from source:
+>
+> 1. **Fork** this repository to your own account on GitHub.
+> 2. **Clone and Checkout** the release branch:
+>    ```bash
+>    git clone https://github.com/YOUR_USERNAME/github-pr-context-mcp.git
+>    cd github-pr-context-mcp
+>    git checkout v0.3.0-hardening
+>    ```
+> 3. **Install via pipx** (the whole command):
+>    ```bash
+>    pipx install -e .
+>    ```
+>    *This links the `github-pr-context-mcp` command to your local repository folder.*
+>
+> 4. **Verify Version**:
+>    ```bash
+>    github-pr-context-mcp --help
+>    ```
 
 ---
 

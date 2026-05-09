@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.paarths-collab/github-pr-context-mcp",
+  "title": "GitHub PR Review Context",
+  "description": "Hardened Pure Context Engine for AI code reviews grounded in your repo history.",
+  "version": "0.3.0",
+  "repository": {
+    "source": "github",
+    "url": "https://github.com/paarths-collab/github-pr-context-mcp"
+  },
+  "install": {
+    "uvx": "uvx github-pr-context-mcp",
+    "pipx": "pipx install github-pr-context-mcp"
+  },
+  "runtime": "python",
+  "capabilities": {
+    "tools": true,
+    "resources": false,
+    "prompts": true
+  }
+}
