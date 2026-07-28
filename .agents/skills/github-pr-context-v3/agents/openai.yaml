@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub PR Context v3"
+  short_description: "Retrieve PR history; reason in your IDE."
+  default_prompt: "Use $github-pr-context-v3 to ground this task in our PR history."

@@ -1,0 +1,2 @@
+include .agents/skills/github-pr-context-v3/SKILL.md
+include .agents/skills/github-pr-context-v3/agents/openai.yaml

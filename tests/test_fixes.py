@@ -5,7 +5,6 @@ from unittest.mock import patch, MagicMock
 # Import the actual methods we modified
 from entrypoints.local.server import _machine_fingerprint, _detect_mode
 from app.state import resolve_namespace as _resolve_namespace
-import storage.vector_store as vs
 
 
 ### Test Bug 1: Windows `os.getlogin()` Fallback
@@ -49,6 +48,9 @@ def test_chroma_persist_dir_default():
     Bug 7: The storage dir defaulted to './chroma_db', wiping out data whenever uvx 
     was run in a transient dir. It should now default to a stable absolute path.
     """
+    pytest.importorskip("chromadb", reason="ChromaDB is required for vector-store integration tests")
+    import storage.vector_store as vs
+
     # Check the actual fallback default encoded in the file, representing what happens if env is missing
     expected_path = os.path.join(os.path.expanduser("~"), ".github-pr-mcp", "chroma_db")
     assert vs._DEFAULT_CHROMA_DIR == expected_path

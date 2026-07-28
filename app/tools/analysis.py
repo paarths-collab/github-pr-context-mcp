@@ -2,6 +2,13 @@ import json
 import asyncio
 from mcp.server.fastmcp import Context
 from storage import query_similar, get_collection_stats
+from app.state import (
+    get_state,
+    is_temporary,
+    resolve_namespace,
+    resolve_repo,
+    track_usage,
+)
 
 async def _get_stale_warning(repo_key: str, temporary: bool, namespace: str | None) -> str | None:
     """Check if the index is stale and return a warning string if so."""
@@ -10,6 +17,13 @@ async def _get_stale_warning(repo_key: str, temporary: bool, namespace: str | No
         days = stats.get("days_old", 30)
         return f"Index is {days} days old. We recommend running 'ensure_repo_ready' to refresh patterns."
     return None
+
+
+def _contextual_query(intent: str, code: str, max_code_chars: int = 4_000) -> str:
+    """Combine a task intent with a bounded code excerpt for semantic retrieval."""
+    excerpt = code.strip()[:max_code_chars]
+    return f"{intent}\n\nCurrent code excerpt:\n{excerpt}" if excerpt else intent
+
 
 def register_analysis_tools(mcp):
     @mcp.tool(name="semantic_search_reviews")
@@ -212,7 +226,7 @@ def register_analysis_tools(mcp):
         context = await asyncio.to_thread(
             query_similar,
             repo_key, 
-            "unit testing integration mock fixtures assert", 
+            _contextual_query("unit testing integration mock fixtures assert", code),
             n_results=12, 
             temporary=temporary, 
             namespace=namespace
@@ -251,7 +265,7 @@ def register_analysis_tools(mcp):
         context = await asyncio.to_thread(
             query_similar,
             repo_key, 
-            "lint style nit readability clean code formatting", 
+            _contextual_query("lint style nit readability clean code formatting", code),
             n_results=12, 
             temporary=temporary, 
             namespace=namespace
@@ -290,7 +304,7 @@ def register_analysis_tools(mcp):
         context = await asyncio.to_thread(
             query_similar,
             repo_key, 
-            "refactor DRY modularity performance complexity abstraction", 
+            _contextual_query("refactor DRY modularity performance complexity abstraction", code),
             n_results=12, 
             temporary=temporary, 
             namespace=namespace
@@ -329,7 +343,7 @@ def register_analysis_tools(mcp):
         context = await asyncio.to_thread(
             query_similar,
             repo_key, 
-            "security vulnerability injection sanitization auth encryption", 
+            _contextual_query("security vulnerability injection sanitization auth encryption", code),
             n_results=15, 
             temporary=temporary, 
             namespace=namespace

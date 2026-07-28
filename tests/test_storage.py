@@ -1,8 +1,16 @@
 import pytest
 import datetime
+
+pytest.importorskip("chromadb", reason="ChromaDB is required for vector-store integration tests")
+
+import storage.vector_store as vector_store
 from storage.vector_store import index_prs, query_similar, get_collection_stats, delete_repo_index
 
-def test_chromadb_roundtrip_with_metadata():
+def test_chromadb_roundtrip_with_metadata(monkeypatch):
+    # This is a Chroma contract test, not a model-download integration test.
+    # Keep CI offline and deterministic by substituting a tiny fixed encoder.
+    monkeypatch.setattr(vector_store, "encode", lambda text: [0.0])
+    monkeypatch.setattr(vector_store, "encode_batch", lambda texts: [[0.0] for _ in texts])
     repo = "test-owner/test-repo"
     namespace = "test-ns"
     

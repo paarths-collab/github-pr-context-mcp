@@ -52,7 +52,7 @@ flowchart TB
 
     subgraph Server["MCP Server"]
         S["app/mcp_app.py"]
-        AU["auth/gmail_identity.py"]
+        AU["auth/github_device_flow.py"]
         AN["analytics/usage_metrics.py"]
         F["fetcher/client.py"]
         T["fetcher/transform.py"]
@@ -63,11 +63,13 @@ flowchart TB
 
     subgraph External["External Services"]
         GH[(GitHub GraphQL API)]
+        KV[(OS credential vault)]
         DB[(ChromaDB)]
     end
 
     U --> A --> S
-    S --> AU
+    S --> AU --> KV
+    AU --> GH
     S --> AN
     S --> F --> GH
     F --> T --> D --> E --> V --> DB
@@ -80,7 +82,8 @@ flowchart TB
 | Node | Responsibility |
 |---|---|
 | `app/mcp_app.py` | MCP tool routing, session state, background task orchestration |
-| `auth/gmail_identity.py` | Role-based Gmail identity & namespace isolation (SQLite) |
+| `auth/github_device_flow.py` | Local GitHub App Device Flow, OS-vault storage, and safe public-client token refresh |
+| `auth/product_github_app.py` | Public App Client ID/slug bundled by the release maintainer; never a secret |
 | `analytics/usage_metrics.py` | Multi-source anonymous usage tracking (SQLite) |
 | `fetcher/client.py` | GitHub GraphQL requests, pagination, and error handling |
 | `fetcher/transform.py` | Raw PR node flattening and normalization |
@@ -104,17 +107,17 @@ sequenceDiagram
     participant M as Encoder
     participant V as Vector Store
 
-    C->>S: ensure_repo_ready(repo, storage, pages)
+    C->>S: ensure_repo_ready(repo, storage, pages, refresh?)
     S->>S: Check existing Permanent/Temporary index
     alt Not Indexed
-        S-->>C: Start Background Indexing Thread & Return Immediately
-        S->>G: Background Thread: Fetch PR pages (30/page)
+    S-->>C: Start background indexing task and return immediately
+        S->>G: Background task: fetch newest-first PR pages (30/page)
         G-->>S: PR nodes + review threads + reviews + files
         S->>X: flatten_prs(nodes)
         X-->>S: normalized PR dictionaries
         S->>B: build_documents(prs)
         B-->>S: docs, metadata, ids
-        S->>M: encode(doc) locally
+        S->>M: encode_batch(docs) locally
         M-->>S: embeddings
         S->>V: upsert() into isolated collection
     end
@@ -150,9 +153,9 @@ sequenceDiagram
 | Permanent | `chromadb.PersistentClient` | Yes | Repeatedly used repositories |
 | Temporary | `chromadb.EphemeralClient` | No | One-off exploration |
 
-### Collection Naming Strategy & Data Isolation
+### Namespace metadata
 
-To support high-concurrency environments safely, the architecture uses **single-collection metadata isolation**. The single `owner--repo` collection holds all chunks, but uses ChromaDB's `where={"namespace": <identity>}` clause alongside `metadata["namespace"]` tags to enforce completely isolated queries per user identity.
+Each repository-and-namespace pair has its own Chroma collection, so indexing, retrieval, and deletion do not share document IDs across namespaces. Hosted authorization still needs end-to-end release validation; treat the hosted multi-user path as experimental until registration and authorization coverage are complete.
 
 ---
 
@@ -161,12 +164,17 @@ To support high-concurrency environments safely, the architecture uses **single-
 | Tool | Primary Purpose | typical Output |
 |---|---|---|
 | `ensure_repo_ready` | Auto-load or background-index a repository | Active repo state + indexing status |
+| `get_github_connection_status` | Check local GitHub App connection state | Token-free connection metadata |
+| `begin_github_authorization` | Start local GitHub Device Flow | GitHub URL + one-time user code |
+| `complete_github_authorization` | Save a browser-approved connection in the OS vault | Token-free connection metadata |
 | `semantic_search_reviews` | General semantic search over historical artifacts | Raw context snippets |
 | `review_code_with_history` | Retrieve context specifically for code review | JSON material + agent instruction |
 | `get_team_review_patterns` | Retrieve raw material for pattern summarization | JSON patterns + agent instruction |
 | `generate_code_from_history` | Retrieve context for grounded code generation | JSON context + agent instruction |
 | `generate_tests` | Retrieve context for test generation | JSON patterns + agent instruction |
 | `get_repo_rules_material` | Retrieve data to write .cursorrules / CLAUDE.md | High-density JSON material |
+| `security_check` | Retrieve historical security discussions | JSON context + agent instruction |
+| `suggest_refactors` | Retrieve past refactoring feedback | JSON context + agent instruction |
 
 ---
 
@@ -179,20 +187,23 @@ github-pr-context-mcp/
 │   ├── quickstart.md      # Usage and storage guide
 │   └── roadmap.md         
 ├── auth/
-│   └── gmail_identity.py  # User identity & SQLite store
+│   ├── github_device_flow.py # Local GitHub App Device Flow + OS-vault boundary
+│   ├── product_github_app.py # Bundled public App identifiers only
+│   └── gmail_identity.py  # Experimental hosted identity store (not GitHub credentials)
 ├── analytics/
 │   └── usage_metrics.py   # Anonymous usage tracking
 ├── app/
 │   ├── mcp_app.py         # MCP tool routing
 │   └── tools/
 │       ├── indexing.py    # Lifecycle tools
+│       ├── github_auth.py # Local GitHub connection tools
 │       ├── analysis.py    # Context retrieval tools
 │       └── generation.py  # Context retrieval tools
 ├── fetcher/
 │   ├── client.py          # GitHub GraphQL logic
 │   └── transform.py       # PR data normalization
 └── storage/
-    ├── vector_store.py    # ChromaDB & namespace isolation
+    ├── vector_store.py    # ChromaDB storage and namespace metadata
     └── encoder.py         # Local embedding generation
 ```
 
