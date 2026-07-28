@@ -26,6 +26,12 @@ test = [
     "pytest==8.2.0",
 ]
 
+[tool.pytest.ini_options]
+# The suite lives in tests/. Without this, a bare `python -m pytest` collects
+# from the repo root and picks up scratch/ helpers whose names happen to match
+# pytest's default `*_test.py` pattern, failing at import.
+testpaths = ["tests"]
+
 [project.scripts]
 github-pr-context-mcp = "entrypoints.local.server:main"
 

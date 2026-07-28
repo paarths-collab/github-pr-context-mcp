@@ -179,6 +179,21 @@ ensure_repo_ready({"repo": "owner/repo", "refresh": true})
 
 An incremental refresh that reaches the page cap becomes `partial` and saves a continuation cursor. Run the same refresh again until it becomes `ready`; its GitHub watermark does not advance while the refresh is partial. For permanent storage, that continuation survives in local cursor state; a temporary index must be rebuilt after a process restart. In either case, the in-memory job display does not survive a restart.
 
+### Incremental indexing by webhook
+
+[`entrypoints/webhook_server.py`](entrypoints/webhook_server.py) is an optional standalone listener that indexes a PR into permanent storage as soon as it is merged, so an index goes stale less quickly between manual refreshes.
+
+```bash
+python entrypoints/webhook_server.py
+```
+
+Then, in the repository's **Settings > Webhooks**, add the server's public URL and send it pull-request events. Set `GITHUB_WEBHOOK_SECRET` in both the environment and the GitHub webhook configuration; when that variable is unset the server logs a warning and accepts unsigned payloads, so treat it as required for any reachable deployment.
+
+> [!IMPORTANT]
+> This listener is **outside** the supported local-stdio Device Flow path. It is a server process with no browser to authorize, so it reads a `GITHUB_TOKEN` from its own environment. It does not use, and cannot reach, the OS-vault credential described above. Run it only where you control that token.
+
+Because it indexes a single PR at a time rather than a complete sweep, it deliberately does not advance the GitHub refresh watermark; a later `ensure_repo_ready({"refresh": true})` still re-examines everything updated since the last full refresh.
+
 ### Storage, namespaces, and migration
 
 | Mode | Where the PR evidence lives | Persistence and limits | Best for |
