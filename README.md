@@ -2,10 +2,10 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.3.0-green)
+![Version](https://img.shields.io/badge/version-0.3.1-green)
 ![Downloads](https://img.shields.io/badge/downloads-5k%2B-blue)
 
-GitHub PR Context MCP is a **v0.3.0 pure-context** MCP server. It retrieves relevant material from a repository's historical pull requests and returns it to an IDE agent. The IDE agent—not this server—does the reasoning, review, code generation, testing, and file edits.
+GitHub PR Context MCP is a **v0.3.1 pure-context** MCP server. It retrieves relevant material from a repository's historical pull requests and returns it to an IDE agent. The IDE agent—not this server—does the reasoning, review, code generation, testing, and file edits.
 
 **v3 in one sentence:** this MCP retrieves evidence; your IDE agent decides what it means and what to do next.
 
@@ -81,7 +81,7 @@ pipx install github-pr-context-mcp
 ```
 
 > [!IMPORTANT]
-> This checked-in source tree intentionally has no bundled product GitHub App identity: `PRODUCT_GITHUB_APP_CLIENT_ID` and `PRODUCT_GITHUB_APP_SLUG` are both `None`. It can run the MCP and its tests, but `get_github_connection_status` reports `not_configured` until a release maintainer configures the public App Client ID. A slug is optional in code, but recommended because it enables the App-installation URL. End users should not supply a token, secret, or Client ID to compensate for an unconfigured release.
+> This release bundles the product GitHub App's public Client ID and slug. End users should not set `GITHUB_APP_CLIENT_ID`, provide a PAT, or provide any App secret. An older checkout or an intentionally unconfigured fork reports `not_configured`; that is a maintainer configuration issue, not a request for user credentials.
 
 ## Configure an IDE client
 
@@ -141,7 +141,7 @@ After restarting the IDE:
 
 ### Release maintainer: configure the App once
 
-Before publishing a usable end-user release, create one public GitHub App, enable Device Flow, and put only its public Client ID (and preferably its URL slug) in [`auth/product_github_app.py`](auth/product_github_app.py). That file deliberately contains no secret. Fork or development builds can instead use the public `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_SLUG` overrides.
+The v0.3.1 release bundles one public GitHub App identity in [`auth/product_github_app.py`](auth/product_github_app.py). Future fork or product maintainers must create their own public App, enable Device Flow, and bundle only its Client ID and URL slug. GitHub may require the App owner to generate a private key before installation; store it securely, but never ship or configure it in this local MCP. Fork or development builds can instead use the public `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_SLUG` overrides.
 
 Once those public identifiers are bundled, users install the App and approve GitHub; they do not create their own App and do not paste a PAT. Never put a GitHub App private key, client secret, access token, or refresh token in downloadable MCP configuration.
 
