@@ -35,8 +35,9 @@ The MCP server never returns an access token, refresh token, or private device c
    - **Pull requests: Read-only**
    - **Metadata: Read-only** (automatic)
 4. Do not add write permissions. v0.3 reads PR titles, bodies, changed-file metadata, review threads, review comments, and commits; it does not write issues, reviews, commits, or files.
-5. Do **not** generate or ship an App private key or client secret for this local release.
-6. Copy the App's public **Client ID** and App URL slug, then replace the two `None` values in [`auth/product_github_app.py`](../../auth/product_github_app.py):
+5. GitHub may require the App owner to generate a private key before the App can be installed. Generate it once and store the downloaded PEM securely, but never ship it, commit it, or configure it in a local MCP. Device Flow uses only the public Client ID.
+6. Do **not** generate or ship a client secret for this local release.
+7. Copy the App's public **Client ID** and App URL slug, then set them in [`auth/product_github_app.py`](../../auth/product_github_app.py):
 
    ```python
    PRODUCT_GITHUB_APP_CLIENT_ID = "Iv1_your_public_client_id"
@@ -45,7 +46,7 @@ The MCP server never returns an access token, refresh token, or private device c
 
    These are public identifiers, not secrets. Commit them before building the release; do not place credentials in `.env` or a client configuration.
 
-7. Publish the package or GitHub release. Every official build then works with the same App.
+8. Publish the package or GitHub release. Every official build then works with the same App.
 
 For an internal fork or temporary development build only, `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_SLUG` override the bundled values. Regular users should never need those settings.
 
