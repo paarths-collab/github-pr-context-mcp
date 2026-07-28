@@ -14,6 +14,11 @@ def is_high_quality_comment(body: str, is_bot: bool) -> bool:
     # Too short to be a substantive review comment
     if len(body_lower) < 15:
         return False
+
+    # A "nit:" prefix flags a deliberately minor remark, so it has to carry more
+    # substance than the general minimum before it earns a place in the index.
+    if body_lower.startswith("nit:") and len(body_lower) < 25:
+        return False
         
     # Common low-signal phrases
     low_signal_phrases = [

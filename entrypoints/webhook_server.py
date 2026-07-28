@@ -51,8 +51,18 @@ def async_index_single_pr(repo_full_name, pr_number):
         # that had not been indexed yet.
         count = index_prs(repo_full_name, target_pr, temporary=False, advance_watermark=False)
         print(f"[+] Incremental index complete. {count} new documents added.")
-        
-    asyncio.run(_run())
+
+    # The one-shot asyncio runner raises RuntimeError if this thread already
+    # has a running loop, so drive an explicitly owned loop and always close it.
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_run())
+    finally:
+        try:
+            asyncio.set_event_loop(None)
+        finally:
+            loop.close()
 
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
