@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Local GitHub App Device Flow with OS-vault-only credentials and token-free MCP tools.
+- A v3 IDE skill that treats PR history as untrusted retrieval evidence and keeps reasoning in the connected IDE agent.
+- Asynchronous index-job status, durable capped-refresh continuation, and deletion invalidation for in-flight jobs.
+- Explicit `migrate-storage` support for copying pre-v3 local indexes and cursors into namespace-scoped v3 storage without deleting the source data.
+
+### Changed
+- The server is retrieval-only: it no longer presents server-side LLM generation or review as a product capability.
+- PR extraction uses forward `updatedAt` pagination, stable GitHub node IDs, batch embeddings, and explicit truncation disclosure.
+- Local namespaces use separate scoped collections; hosted GitHub retrieval remains disabled until a tenant-aware backend exists.
+
+### Fixed
+- Prevented legacy hosted GitHub token values from being returned through settings updates.
+- Prevented a deleted index from being recreated by a late background job.
+- Prevented capped refreshes from advancing their GitHub watermark before all pages are processed.
+
 ## [0.3.0] - 2024-05-08
 
 ### Added
