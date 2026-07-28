@@ -57,7 +57,13 @@ class _Client:
         self.collections = {}
 
     def get_or_create_collection(self, *, name, metadata):
-        return self.collections.setdefault(name, _Collection(metadata))
+        # Chroma 0.5 replaces collection metadata when metadata is supplied
+        # to get_or_create_collection for an existing collection.
+        if name in self.collections:
+            self.collections[name].metadata = dict(metadata or {})
+        else:
+            self.collections[name] = _Collection(metadata)
+        return self.collections[name]
 
     def get_collection(self, name):
         return self.collections[name]
@@ -168,6 +174,20 @@ def test_failed_embedding_does_not_advance_refresh_watermark(monkeypatch):
         )
 
     assert cursor_store.set_calls == []
+
+
+def test_stats_reads_do_not_reset_existing_chroma_metadata(monkeypatch):
+    vector_store, _, _ = _load_vector_store(monkeypatch)
+    repo = "acme/widget"
+
+    vector_store.index_prs(
+        repo,
+        [_pr(1, [{"id": "pr-1-desc", "type": "pr_description", "text": "body"}])],
+    )
+
+    stats = vector_store.get_collection_stats(repo)
+
+    assert stats["last_indexed_at"] is not None
 
 
 def test_complete_refresh_removes_stale_documents_but_partial_nested_data_does_not(monkeypatch):

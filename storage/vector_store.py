@@ -115,10 +115,17 @@ def _client(temporary: bool):
     return _ephemeral_client if temporary else _persistent_client
 
 def _get_collection(repo_key: str, temporary: bool = False, namespace: str | None = None):
-    return _client(temporary).get_or_create_collection(
-        name=_collection_name(repo_key, namespace=namespace),
-        metadata=_collection_metadata(repo_key, namespace=namespace),
-    )
+    client = _client(temporary)
+    name = _collection_name(repo_key, namespace=namespace)
+    try:
+        # Chroma 0.5 applies supplied metadata to an existing collection.
+        # Read paths must not reset timestamps such as ``last_indexed_at``.
+        return client.get_collection(name=name)
+    except Exception:
+        return client.get_or_create_collection(
+            name=name,
+            metadata=_collection_metadata(repo_key, namespace=namespace),
+        )
 
 
 # ── Status checks ─────────────────────────────────────────────────────────────
