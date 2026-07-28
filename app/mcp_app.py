@@ -13,6 +13,7 @@ from app.tools.indexing import register_indexing_tools
 from app.tools.analysis import register_analysis_tools
 from app.tools.generation import register_generation_tools
 from app.tools.admin import register_admin_tools
+from app.tools.github_auth import register_github_auth_tools
 from app.routes.http import register_http_routes
 
 # Initialize FastMCP
@@ -31,6 +32,7 @@ register_indexing_tools(mcp)
 register_analysis_tools(mcp)
 register_generation_tools(mcp)
 register_admin_tools(mcp)
+register_github_auth_tools(mcp)
 
 # Register HTTP Routes
 register_http_routes(mcp)
@@ -38,7 +40,8 @@ register_http_routes(mcp)
 # Background Sync Loop (GitHub Traffic)
 def _github_sync_loop():
     repo = os.getenv("GITHUB_TRAFFIC_REPO")
-    token = os.getenv("GITHUB_TOKEN")
+    # Analytics credentials must not share the developer's PR-context token.
+    token = os.getenv("GITHUB_TRAFFIC_TOKEN")
     if not repo or not token or not usage_store:
         return
     

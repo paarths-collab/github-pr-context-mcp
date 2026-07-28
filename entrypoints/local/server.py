@@ -1,9 +1,16 @@
 import argparse
 import hashlib
+import json
 import os
 import platform
 import sys
 import threading
+
+
+# The local entrypoint is the only supported place for OS-vault Device Flow.
+# Set this before importing app.mcp_app so the shared state module fails closed
+# when it is instead loaded by an HTTP/deployment process.
+os.environ.setdefault("GITHUB_PR_CONTEXT_RUNTIME", "local")
 
 
 def _machine_fingerprint() -> str:
@@ -31,14 +38,14 @@ def _machine_fingerprint() -> str:
 
 def _send_startup_ping(mode: str) -> None:
     """Fire-and-forget anonymous ping to the Render server for user counting.
-    Only sends if TELEMETRY_ENDPOINT is configured. Defaults to opt-in via TELEMETRY=true.
+    Only sends when both TELEMETRY=true and TELEMETRY_ENDPOINT are configured.
     Never blocks startup — runs in a daemon thread.
     """
-    telemetry = os.getenv("TELEMETRY", "true").strip().lower()
+    telemetry = os.getenv("TELEMETRY", "false").strip().lower()
     if telemetry in {"0", "false", "no", "off"}:
         return
 
-    endpoint = os.getenv("TELEMETRY_ENDPOINT", "https://github-pr-context-mcp.onrender.com").strip()
+    endpoint = os.getenv("TELEMETRY_ENDPOINT", "").strip()
     if not endpoint:
         return
 
@@ -109,42 +116,47 @@ def _detect_mode() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="GitHub PR Context MCP Server - Provides historical PR review context for code reviews.",
+        description="GitHub PR Context v0.3 - Retrieves historical PR context for an IDE agent to reason over.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Tools Overview:
+  This is a pure-context server: it retrieves evidence; the IDE agent performs review,
+  code generation, test design, and file edits.
+
+  - get_github_connection_status / begin_github_authorization: Connect GitHub securely.
   - ensure_repo_ready: Prepares a repository for querying (indexes PRs).
   - semantic_search_reviews: Search past review comments by meaning.
-  - review_code_with_history: Get a code review based on past team patterns.
-  - generate_code_from_history: Generate new code grounded in team history.
+  - review_code_with_history: Get historical material for an IDE code review.
+  - generate_code_from_history: Get historical material for an IDE implementation.
   - get_team_review_patterns: Identify recurring feedback in a repository.
   - list_indexed_repos: See which repositories are already available.
 
 Configuration (Environment Variables):
-  - GITHUB_TOKEN: (Required) Personal Access Token with 'repo' scope.
-  - LLM_PROVIDER: (Optional) cerebras|openai|anthropic|gemini|ollama (default: cerebras).
-  - LLM_API_KEY: (Optional) API key for your chosen provider.
+  - The official release already bundles its public GitHub App Client ID. Users do not add one.
+  - GITHUB_APP_CLIENT_ID / GITHUB_APP_SLUG: Optional maintainer-only override for a fork or development build.
+  - GITHUB_CREDENTIAL_PROFILE: (Optional) local OS-vault profile; defaults to 'default'.
   - CHROMA_PERSIST_DIR: (Optional) Custom path for persistent storage (default: ~/.github-pr-mcp/chroma_db).
-  - TELEMETRY: (Optional) set to 'false' to opt-out of anonymous usage pings.
+  - TELEMETRY: (Optional) set to 'true' with TELEMETRY_ENDPOINT to enable anonymous usage pings.
 
 Important Concepts:
   - Permanent Storage: Indexed data is saved to disk and persists across restarts.
   - Temporary Storage: Indexed data is kept in memory and lost when the server stops.
-  - Namespace: Use namespaces to isolate indexed data between different teams or users.
+  - Namespace: Useful for local organization; do not treat hosted multi-user isolation as release-ready yet.
 
 Example Usage (Claude Desktop Config):
 {
   "mcpServers": {
     "github-pr-context": {
-      "command": "github-pr-context-mcp",
-      "env": {
-        "GITHUB_TOKEN": "your_github_token_here",
-        "LLM_PROVIDER": "anthropic",
-        "LLM_API_KEY": "your_anthropic_key_here"
-      }
+      "command": "github-pr-context-mcp"
     }
   }
 }
+
+After restarting the IDE, call get_github_connection_status, then
+begin_github_authorization. Approve the one-time code in GitHub and call
+complete_github_authorization. The credential is stored in the OS vault.
+Users never paste a GitHub token or create their own GitHub App. Never put a
+GitHub App client secret or private key in this local configuration.
 
 Path & Installation:
   The executable is typically installed to your user's local bin directory.
@@ -157,8 +169,8 @@ Path & Installation:
 Tool Selection & Strategy (When to use what):
   - Indexing: Always start with `ensure_repo_ready`. Use it again if the repo has changed significantly.
   - Research: Use `semantic_search_reviews` when you have a specific technical question (e.g., "How do we handle auth?").
-  - Writing Code: Use `generate_code_from_history` for new features or refactors to stay consistent with team patterns.
-  - Code Review: Use `review_code_with_history` before submitting a PR to catch issues early.
+  - Writing Code: Use `generate_code_from_history`, then let the IDE agent write and test the change.
+  - Code Review: Use `review_code_with_history`, then let the IDE agent evaluate the evidence.
   - Analysis: Use `get_team_review_patterns` to understand the team's "soul" and recurring feedback themes.
 
 Tool Selection Strategy (JSON for AI Agents):
@@ -177,14 +189,17 @@ Tool Selection Strategy (JSON for AI Agents):
       "generate_code_from_history":{"call_when": "user asks to write/implement/generate code" },
       "get_team_review_patterns":{ "call_when": "user wants team norms / onboarding / standards" },
       "get_index_stats":         { "call_when": "verify index is complete / how many docs" },
-      "update_settings":         { "call_when": "change token or LLM key (hosted mode only)" },
+      "get_repo_rules_material": { "call_when": "user wants historical material for local CLAUDE.md or .cursorrules" },
+      "get_github_connection_status": { "call_when": "before first indexing / diagnose GitHub access" },
+      "begin_github_authorization": { "call_when": "local GitHub is disconnected" },
+      "complete_github_authorization": { "call_when": "after the user approves the one-time GitHub code" },
+      "disconnect_github":       { "call_when": "user asks to remove local GitHub access" },
       "get_usage_stats":         { "call_when": "admin asks for adoption metrics" },
-      "generate_repo_rules":     { "call_when": "user wants .cursorrules / CLAUDE.md / copilot-instructions.md from repo history" }
     },
     "session_flow": [
       "1. ensure_repo_ready",
       "2. get_team_review_patterns (optional)",
-      "2b. generate_repo_rules (optional — writes rules file once for future sessions)",
+      "2b. get_repo_rules_material (optional — IDE agent writes any local rules file)",
       "3. semantic_search_reviews | generate_code_from_history | review_code_with_history",
       "4. get_index_stats (optional)"
     ]
@@ -194,7 +209,7 @@ Tool Selection Strategy (JSON for AI Agents):
 Troubleshooting:
   - "command not found": Use the absolute path. Run `github-pr-context-mcp config` to get it.
   - "invalid character": Fixed! This server now uses stderr for logs.
-  - Rate limits: Ensure GITHUB_TOKEN is valid and has 'repo' scope.
+  - GitHub access: Check get_github_connection_status, then reconnect with Device Flow if needed.
   - Windows [WinError 32] (PermissionError):
       This happens when trying to 'pipx upgrade' while the server is running.
       1. Close MCP clients (Cursor, Claude Desktop).
@@ -218,42 +233,92 @@ Troubleshooting (JSON for AI Agents):
   ```
 """
     )
-    parser.add_argument("command", nargs="?", choices=["config"], help="Run a helper command (e.g. 'config' to get your IDE snippet)")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["config", "migrate-storage", "install-skill"],
+        help="Run a helper command (e.g. 'config', 'migrate-storage', or 'install-skill')",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report legacy-index migration work without writing data.",
+    )
+    parser.add_argument(
+        "--skill-dir",
+        help="Directory that should receive github-pr-context-v3 when using install-skill.",
+    )
     
     args = parser.parse_args()
 
     if args.command == "config":
-        import json
-        import sys
-        
         # Detect absolute path of the current binary/script
         abs_path = os.path.abspath(sys.argv[0])
-        command_val = abs_path
         
-        # If running from source (.py file), prefix with python
+        # If running from source (.py file), use python and script path separately
         if abs_path.endswith(".py"):
-            python_exe = sys.executable
-            command_val = f"{python_exe} {abs_path}"
+            command = sys.executable
+            args_list = [abs_path]
+        else:
+            command = abs_path
+            args_list = []
         
         detected_os = platform.system()
         
         config = {
             "mcpServers": {
                 "github-pr-context": {
-                    "command": command_val,
-                    "env": {
-                        "GITHUB_TOKEN": "YOUR_GITHUB_TOKEN",
-                        "LLM_PROVIDER": "cerebras",
-                        "LLM_API_KEY": "YOUR_LLM_API_KEY"
-                    }
+                    "command": command,
+                    "args": args_list
                 }
             }
         }
         print(f"\n=== {detected_os.upper()} CONFIG SNIPPET ===", file=sys.stderr)
-        print(f"Detected binary at: {command_val}", file=sys.stderr)
+        print(f"Detected binary at: {abs_path}", file=sys.stderr)
         print("Copy the JSON below into your mcpConfig.json file:", file=sys.stderr)
         print(json.dumps(config, indent=2))
-        print("\nNOTE: Ensure you replace YOUR_GITHUB_TOKEN and YOUR_LLM_API_KEY.\n", file=sys.stderr)
+        print("\nNOTE: Restart the IDE, then use the GitHub Device Flow tools to connect. A configured official release includes its public App Client ID.\n", file=sys.stderr)
+        sys.exit(0)
+
+    if args.command == "migrate-storage":
+        from storage.cursor_store import cursor_store
+        from storage.legacy_migration import migrate_legacy_storage
+        from storage.vector_store import _persistent_client
+
+        report = migrate_legacy_storage(
+            _persistent_client,
+            cursor_store,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(report, indent=2))
+        sys.exit(0)
+
+    if args.command == "install-skill":
+        from pathlib import Path
+        import shutil
+        import sysconfig
+
+        source_root = Path(__file__).resolve().parents[2] / ".agents" / "skills" / "github-pr-context-v3"
+        if not source_root.is_dir():
+            source_root = (
+                Path(sysconfig.get_path("data"))
+                / "share"
+                / "github-pr-context-mcp"
+                / "skills"
+                / "github-pr-context-v3"
+            )
+        if not source_root.is_dir():
+            raise RuntimeError("The packaged github-pr-context-v3 skill could not be found.")
+
+        target_root = Path(args.skill_dir).expanduser() if args.skill_dir else Path.cwd() / ".agents" / "skills"
+        destination = target_root / "github-pr-context-v3"
+        if destination.exists():
+            raise RuntimeError(
+                f"Skill destination already exists: {destination}. Remove it deliberately before reinstalling."
+            )
+        target_root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_root, destination)
+        print(f"Installed v3 skill at: {destination}")
         sys.exit(0)
 
     # Import here so that env vars from IDE env block are set before mcp_app loads
@@ -269,14 +334,11 @@ Troubleshooting (JSON for AI Agents):
     if mode == "local":
         print(
             "\n" + "="*60 + "\n"
-            "[ANNOUNCEMENT] github-pr-context-mcp is now available on PyPI!\n"
+            "[INFO] Running github-pr-context-mcp from a source checkout.\n"
             "="*60 + "\n"
-            "You are running from a local git clone. We strongly recommend\n"
-            "switching to the official package for:\n"
-            "  1. Automatic path management in IDEs\n"
-            "  2. One-click updates (pipx upgrade)\n"
-            "  3. Cleaner environment isolation\n\n"
-            "Run: pipx install github-pr-context-mcp\n"
+            "To install this checkout into an isolated environment, run:\n"
+            "  pipx install .\n\n"
+            "The package command is github-pr-context-mcp.\n"
             "="*60 + "\n",
             file=sys.stderr
         )

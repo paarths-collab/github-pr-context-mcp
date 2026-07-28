@@ -1,29 +1,17 @@
 # Integrations
 
-This project supports two clean deployment modes:
+## Local MCP (recommended for v0.3)
 
-- Local MCP: the server runs on the user's machine, so Chroma storage stays local to that user.
-- Deployed MCP (Upcoming): the server runs on Render, and storage is isolated by namespace or user identity.
+Run the server as a local stdio process from your IDE. Chroma data stays on the machine that runs the server, the IDE agent owns all reasoning, and GitHub access uses the product-owned GitHub App through Device Flow with a credential stored in the OS vault.
 
-If you want each user's storage to remain local to their machine, use the local mode.
-If you want a shared hosted service (Upcoming), use the deployed mode plus Gmail-only auth.
+- [Local setup](local.md)
+- [Client configuration examples](clients.md)
+- [Configuration reference](../guides/configuration.md)
+- [Free local GitHub App flow](../guides/github-app-device-flow.md)
 
-## Quick Compare
+## Hosted MCP
 
-| Mode | User Type | Where Storage Lives | Key Benefit |
-|---|---|---|---|
-| **Solo Developer** | Individual | Local machine | Full privacy & control |
-| **Team Collaboration**| Teams / Orgs | Render (Upcoming) | Shared standards & infra |
+The repository includes an HTTP entry point and Render configuration, but the hosted multi-user enrollment and isolation path is not yet a release-ready v0.3 workflow. Do not use it for a production multi-tenant deployment without completing and testing that work.
 
-## 🕹️ Choosing your mode
-
-### 1. Solo Developer (Local)
-Recommended if you are an individual developer or working on highly sensitive local code. The server runs as a child process of your IDE via `uvx`, `pipx`, or a local installation.
-
-- [Local Setup Guide](local.md)
-
-### 2. Team Collaboration (Hosted - UPCOMING)
-Recommended for engineering teams that want a single "Review Source of Truth." One person deploys to Render, and the rest of the team connects via a secure Bearer token. 
-
-- [Deployment Guide](deployed.md)
-- [Gmail-Only Auth Flow](auth.md)
+- [Hosted deployment notes](deployed.md)
+- [Authentication status](auth.md)
