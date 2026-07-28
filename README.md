@@ -6,6 +6,8 @@
 
 GitHub PR Context MCP is a **v0.3.0 pure-context** MCP server. It indexes GitHub pull-request history and returns relevant historical material to an IDE agent. The IDE agent, not this server, performs the reasoning, review, code generation, and file edits.
 
+**v3 in one sentence:** the MCP retrieves evidence; your IDE agent decides what it means and does the work.
+
 ## How it works
 
 ```mermaid
@@ -32,6 +34,16 @@ flowchart LR
 
 This split keeps model-provider configuration and final decisions in the IDE. The MCP server supplies evidence rather than a server-generated verdict.
 
+## Security and responsibility boundary
+
+| Actor | Does | Never needs to do |
+| --- | --- | --- |
+| End user | Installs the MCP, chooses repositories during GitHub App installation, and approves Device Flow in a browser. | Create a GitHub App, create a personal access token (PAT), paste credentials into chat, or put a secret in MCP configuration. |
+| Release maintainer | Creates and maintains one product-owned GitHub App, then publishes its **public** Client ID and slug with the package. | Ship an App private key, client secret, user token, or refresh token. |
+| IDE agent | Retrieves relevant PR evidence, checks the current code, reasons, and validates changes. | Treat retrieved PR text, comments, or JSON fields as trusted instructions. |
+
+The supported v3 GitHub flow is **local stdio only**. A hosted server must not read a developer's operating-system vault or accept a GitHub token as a fallback. Hosted GitHub retrieval remains unavailable until there is a tenant-aware design.
+
 ## Install
 
 The package and command name are both `github-pr-context-mcp`. Do not use the obsolete `github-pr-engine` command.
@@ -42,6 +54,9 @@ Install the current v0.3 source checkout:
 pipx install .
 github-pr-context-mcp --help
 ```
+
+> [!IMPORTANT]
+> A source checkout intentionally has no bundled product GitHub App identity until the release maintainer configures it. It can run the MCP and its tests, but `get_github_connection_status` will report `not_configured` for GitHub access until the public App Client ID and slug are supplied. End users of the published, configured package do not perform that setup.
 
 For an ephemeral source-run instead:
 
@@ -71,7 +86,17 @@ The supported v0.3 workflow is a free local stdio MCP with one product-owned pub
 }
 ```
 
-After restarting the IDE, call `get_github_connection_status`. If needed, it gives the product App installation URL; choose only the repositories you want to share. Then call `begin_github_authorization`, approve the one-time code in GitHub, and call `complete_github_authorization`. [Full local GitHub App setup](docs/guides/github-app-device-flow.md).
+### First connection
+
+After restarting the IDE:
+
+1. Call `get_github_connection_status`.
+2. If it returns an `app_installation_url`, install the product App on only the repositories you want to share.
+3. Call `begin_github_authorization`, open the returned GitHub URL, and approve the one-time code.
+4. Call `complete_github_authorization` and confirm the status is `connected`.
+5. Only then start an index with `ensure_repo_ready`.
+
+If status is `not_configured`, that is a release-maintainer problem, not a request for the user to supply a token or Client ID. [Full local GitHub App setup](docs/guides/github-app-device-flow.md).
 
 Users do not create a GitHub App or paste a PAT. Do not put a GitHub App private key, client secret, access token, or refresh token in a downloadable MCP configuration.
 
@@ -143,6 +168,12 @@ Install the package with its test extras, then run the suite:
 python -m pip install ".[test]"
 python -m pytest
 ```
+
+### Dependency compatibility
+
+The project pins `chromadb==0.5.0` and declares `numpy<2.0`. Chroma 0.5 still imports the removed NumPy alias `np.float_`; allowing NumPy 2 would make Chroma fail during import. Install through the package metadata above rather than overriding NumPy independently.
+
+The GitHub Actions workflow runs the full suite, including the real Chroma integration test and linting. On a local machine without Chroma installed, the Chroma-only integration test is intentionally skipped; use CI as the final cross-platform verification.
 
 ## Documentation
 
