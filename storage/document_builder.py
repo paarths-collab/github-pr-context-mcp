@@ -4,6 +4,34 @@
 import json
 
 
+def is_high_quality_comment(body: str, is_bot: bool) -> bool:
+    """Filter out low-signal PR comments to improve embedding quality."""
+    if is_bot:
+        return False
+        
+    body_lower = body.strip().lower()
+    
+    # Too short to be a substantive review comment
+    if len(body_lower) < 15:
+        return False
+
+    # A "nit:" prefix flags a deliberately minor remark, so it has to carry more
+    # substance than the general minimum before it earns a place in the index.
+    if body_lower.startswith("nit:") and len(body_lower) < 25:
+        return False
+        
+    # Common low-signal phrases
+    low_signal_phrases = [
+        "lgtm", "looks good", "looks good to me", "+1", "nit:", "agreed", 
+        "done", "fixed", "thanks", "bump", "ping", "addressed"
+    ]
+    
+    # If the comment is just a short variation of a low-signal phrase
+    if any(body_lower == p or (body_lower.startswith(p) and len(body_lower) < len(p) + 10) for p in low_signal_phrases):
+        return False
+        
+    return True
+
 def _review_is_bot(review: dict) -> bool:
     """Return a reviewer's bot flag without relying on an inline comment."""
     if "is_bot" in review:
@@ -72,7 +100,7 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
 
         # Inline review comments + code context
         for i, comment in enumerate(pr["review_comments"]):
-            if not comment["body"].strip():
+            if not is_high_quality_comment(comment["body"], comment.get("is_bot", False)):
                 continue
             
             diff_text = f"\nCode Context:\n{comment['diff_hunk']}" if comment.get("diff_hunk") else ""
@@ -85,7 +113,6 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "pr_number": pr_num,
                 "file": comment["file"],
                 "author": comment["author"],
-                "is_bot": comment.get("is_bot", False),
                 "resolved": comment["resolved"],
                 "touches_ci": pr.get("touches_ci", False),
                 **extraction_metadata,
@@ -109,7 +136,11 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
 
         # Overall review summaries (only those with written body)
         for i, review in enumerate(pr["reviews"]):
-            if not review["body"].strip():
+            # Bot review summaries are deliberately indexed (they are tagged via the
+            # `is_bot` metadata below so callers can filter downstream), so the bot
+            # rejection in is_high_quality_comment is bypassed here. Only the
+            # length/low-signal checks apply to review summaries.
+            if not is_high_quality_comment(review["body"], False):
                 continue
             docs.append(
                 f"PR #{pr_num} overall review by {review['author']} "

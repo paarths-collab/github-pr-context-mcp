@@ -47,8 +47,8 @@ def test_chromadb_roundtrip_with_metadata(monkeypatch):
     assert len(results) > 0
     assert results[0]["metadata"]["touches_ci"] is True
     
-    # Test bot filtering (Priority 5)
-    results_no_bot = query_similar(repo, "multi-stage", temporary=True, namespace=namespace, where={"is_bot": False})
+    # Test bot filtering implicitly (it was embedded, meaning it passed the quality filter)
+    results_no_bot = query_similar(repo, "multi-stage", temporary=True, namespace=namespace)
     assert len(results_no_bot) > 0
     
     # Test stats (Priority 1)

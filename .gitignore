@@ -15,3 +15,16 @@ dist/
 *.egg-info/
 .pytest_cache/
 .gstack/
+
+# Retired virtualenvs kept around after a rebuild
+.venv_old*/
+
+# Vendored MCP registry publisher CLI (re-download rather than commit 27MB)
+mcp-publisher
+mcp-publisher.exe
+mcp-publisher.tar.gz
+
+# Generated output: logs and eval-harness results
+*.log
+benchmarks/eval_results_*.csv
+benchmarks/eval_summary_*.json
