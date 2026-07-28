@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -55,8 +56,8 @@ def prompt_config():
         print("    This automatically handles absolute paths and simplifies updates.\n")
 
     print("How are you running this MCP Server?")
-    print("1. Locally (using uvx or python from this directory)")
-    print("2. Hosted on Render (SSE / Remote)")
+    print("1. Local v3 (recommended, free, and private to this machine)")
+    print("2. Remote hosted deployment (not available for public self-service in v0.3)")
     
     choice = input("Select an option [1]: ").strip() or "1"
     
@@ -64,48 +65,33 @@ def prompt_config():
     
     if choice == "1":
         print("\nConfiguring Local execution...")
-        github_token = input("GitHub PAT (leave blank to skip): ").strip()
-        llm_provider = input("LLM Provider (default: cerebras): ").strip() or "cerebras"
-        llm_api_key = input(f"LLM API Key for {llm_provider} (leave blank to skip): ").strip()
-        
-        # Determine execution path
+        print("A configured v0.3 release uses the bundled product GitHub App through Device Flow.")
+        print("Do not paste a GitHub token or Client ID. After your IDE restarts, the")
+        print("MCP will give you the safe GitHub installation and approval links.")
+
+        # Prefer the actual installed entrypoint. ``pipx install .`` creates an
+        # isolated virtual environment, so using this script's interpreter would
+        # otherwise make the IDE miss the MCP package and its dependencies.
+        installed_command = shutil.which("github-pr-context-mcp")
         current_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        python_exe = sys.executable
-        
-        env_vars = {}
-        if github_token: env_vars["GITHUB_TOKEN"] = github_token
-        if llm_api_key: env_vars["LLM_API_KEY"] = llm_api_key
-        if llm_provider: env_vars["LLM_PROVIDER"] = llm_provider
-        env_vars["CHROMA_PERSIST_DIR"] = os.path.join(current_dir, "chroma_db")
-        
-        mcp_host_config = {
-            "command": python_exe,
-            "args": [os.path.join(current_dir, "entrypoints", "local", "server.py")],
-            "env": env_vars
-        }
+        if installed_command:
+            print(f"Using installed command: {installed_command}")
+            mcp_host_config = {"command": installed_command}
+        else:
+            print("Installed command not found; using this source checkout's Python environment.")
+            print("Install with 'pipx install .' for a portable, isolated command.")
+            mcp_host_config = {
+                "command": sys.executable,
+                "args": [os.path.join(current_dir, "entrypoints", "local", "server.py")],
+                "env": {
+                    "CHROMA_PERSIST_DIR": os.path.join(current_dir, "chroma_db")
+                },
+            }
     else:
-        print("\nConfiguring Hosted Render execution (SSE bridge via npx)...")
-        render_url = input("Render URL (e.g. https://github-pr-context-mcp.onrender.com): ").strip().rstrip("/")
-        bearer_token = input("Auth Token (Bearer logic from GmailIdentity): ").strip()
-        
-        if not render_url:
-            print("Error: Render URL is required.")
-            sys.exit(1)
-            
-        sse_url = f"{render_url}/mcp/sse"
-        
-        # ── Fix: Most IDEs (Cursor, Windsurf, Claude Desktop) require generic stdio proxy wrappers for remote SSE endpoints.
-        mcp_host_config = {
-            "command": "npx",
-            "args": [
-                "-y",
-                "@smithery/cli@latest",
-                "run",
-                sse_url,
-                "--config",
-                json.dumps({"headers": {"Authorization": f"Bearer {bearer_token}" if bearer_token else ""}})
-            ]
-        }
+        print("\nRemote public onboarding is intentionally disabled in v0.3.")
+        print("It needs tenant-aware authentication, encrypted server-side storage, and")
+        print("a product-owned GitHub App backend. Use the free local option instead.")
+        sys.exit(2)
 
     return mcp_host_config
 
@@ -163,7 +149,9 @@ def main():
     for name, info in targets:
         inject_config(mcp_config, name, info)
         
-    print("\nDone! Feel free to restart your IDE or Client app to pick up the new MCP Server.")
+    print("\nDone! Restart your IDE or client, then call get_github_connection_status.")
+    print("If it is disconnected, call begin_github_authorization, install the App on")
+    print("only the repositories you choose, and complete the one-time GitHub approval.")
 
 if __name__ == "__main__":
     main()

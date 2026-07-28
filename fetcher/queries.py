@@ -4,25 +4,29 @@ PR_QUERY = """
 query GetPRs($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequests(
-      last: 30,
+      first: 30,
       states: [MERGED, CLOSED],
-      before: $cursor,
+      after: $cursor,
       orderBy: {field: UPDATED_AT, direction: DESC}
     ) {
       pageInfo {
-        hasPreviousPage
-        startCursor
+        hasNextPage
+        endCursor
       }
       nodes {
+        id
         number
         title
         body
         author { login }
         createdAt
+        updatedAt
         mergedAt
+        state
         additions
         deletions
         files(first: 100) {
+          pageInfo { hasNextPage }
           nodes {
             path
             additions
@@ -31,13 +35,17 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
           }
         }
         reviewThreads(first: 100) {
+          pageInfo { hasNextPage }
           nodes {
+            id
             isResolved
             path
             line
             diffHunk
             comments(first: 50) {
+              pageInfo { hasNextPage }
               nodes {
+                id
                 author { login }
                 body
                 createdAt
@@ -45,15 +53,19 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
             }
           }
         }
-        commits(first: 10) {
+        commits(first: 100) {
+          pageInfo { hasNextPage }
           nodes {
             commit {
+              oid
               message
             }
           }
         }
         reviews(first: 50) {
+          pageInfo { hasNextPage }
           nodes {
+            id
             author { login }
             state
             body

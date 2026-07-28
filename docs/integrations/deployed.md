@@ -1,40 +1,20 @@
-# Deployed Integration
+# Hosted deployment status
 
-Use this when you want a hosted MCP server on Render.
+The repository includes a streamable-HTTP entry point and `render.yaml`, but v0.3’s hosted multi-user enrollment and storage-isolation path is not yet validated for a production release.
 
-For Gmail-only sign-up and identity separation, see [Gmail-only auth](auth.md).
-For full per-IDE configs, see [Client configurations](clients.md).
+Use the [local integration](local.md) for the supported v0.3 workflow.
 
-## Render
+## Controlled deployment notes
 
-Deploy `entrypoints/deployed/server.py` as the start command. Set these environment variables:
+For a controlled infrastructure experiment, the existing Render configuration can supply:
 
-- `MCP_TRANSPORT=streamable-http`
-- `HOST=0.0.0.0`
-- `PORT=10000` or the port Render assigns
-- `GITHUB_TOKEN`
-- `LLM_PROVIDER`
-- `LLM_MODEL`
-- `LLM_API_KEY`
-- `CHROMA_PERSIST_DIR=/var/data/chroma_db` or another Render persistent disk mount
-- `USAGE_TRACKING_ENABLED=true`
-- `USAGE_STATS_PATH=/var/data/usage_stats.json`
-- `AUTH_REQUIRED=true`
-- `AUTH_REGISTRY_PATH=/var/data/auth_registry.json`
-- `MCP_PUBLIC_URL=https://YOUR-SERVICE.onrender.com/mcp`
-- `REGISTRATION_SECRET=...`
+- `HOST` and `PORT`
+- `CHROMA_PERSIST_DIR=/var/data/chroma_db` on the persistent disk
 
-These LLM and GitHub values are configured by the deployer by default:
+It is not an enabled GitHub retrieval deployment: local Device Flow tools correctly return `unsupported` in hosted mode, and this release deliberately does not accept a global `GITHUB_TOKEN`. The server does not need an LLM provider, model name, or LLM API key. The client IDE agent performs the final reasoning.
 
-- `GITHUB_TOKEN`
-- `LLM_PROVIDER`
-- `LLM_MODEL`
-- `LLM_API_KEY`
+The new local GitHub App Device Flow is deliberately **not** a hosted credential design: an operating-system vault belongs to one developer's machine, not to a shared web service. Never put `GITHUB_APP_CLIENT_SECRET` or a private key in an MCP client configuration or Render YAML.
 
-Simple mode: users do not need to set any API keys and can just use bearer auth.
+Before offering hosted access to multiple people, implement and test tenant registration, GitHub App installation callbacks/webhooks, authorization, short-lived installation credentials in an encrypted tenant-bound vault/KMS, refresh locking, revocation, namespace-specific indexing, querying, and deletion. Do not infer those guarantees from configuration names alone.
 
-Advanced mode (optional): authenticated users can store their own `github_token` and LLM settings via `/settings`, and those values are used for their requests.
-
-Each user registers a Gmail once and gets a bearer token. The Gmail becomes the namespace, so two different people cannot share the same email without sharing the same token.
-
-If you want the user's storage to stay local instead of hosted, use the local integration instead of Render.
+Back to [Integrations](index.md)

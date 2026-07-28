@@ -1,11 +1,3 @@
-mcp
-chromadb
-sentence-transformers
-python-dotenv
-requests
-
-# ── LLM Provider (install only the one you use) ───────────────────────────────
-cerebras-cloud-sdk    # default — fastest, free tier at cloud.cerebras.ai
-openai              # for OpenAI, Groq, or Ollama (all OpenAI-compatible)
-anthropic           # for Claude models
-google-generativeai # for Gemini models
+# Runtime dependencies are declared in pyproject.toml.
+# Installing this local package keeps development and deployment dependency sets aligned.
+.

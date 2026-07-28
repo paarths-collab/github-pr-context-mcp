@@ -85,11 +85,13 @@ class GmailIdentityStore:
         if not isinstance(settings, dict):
             raise ValueError("settings must be an object")
 
-        sanitized: dict[str, str] = {}
+        if "github_token" in settings:
+            raise ValueError(
+                "github_token is not accepted. GitHub credentials must use the "
+                "local Device Flow credential vault, not hosted SQLite settings."
+            )
 
-        github_token = self._normalize_optional(settings.get("github_token"), "github_token")
-        if github_token:
-            sanitized["github_token"] = github_token
+        sanitized: dict[str, str] = {}
 
         llm_provider = self._normalize_optional(settings.get("llm_provider"), "llm_provider", max_len=64)
         if llm_provider:
@@ -116,9 +118,19 @@ class GmailIdentityStore:
 
         return sanitized
 
-    def _masked_settings(self, settings: dict[str, str]) -> dict[str, str]:
-        masked = deepcopy(settings)
-        for key in ("github_token", "llm_api_key"):
+    @staticmethod
+    def _drop_legacy_github_token(settings: Any) -> tuple[dict[str, Any], bool]:
+        """Remove a pre-v0.3 PAT without ever returning it to a caller."""
+        if not isinstance(settings, dict):
+            return {}, False
+        cleaned = deepcopy(settings)
+        removed = "github_token" in cleaned
+        cleaned.pop("github_token", None)
+        return cleaned, removed
+
+    def _masked_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        masked, _ = self._drop_legacy_github_token(settings)
+        for key in ("llm_api_key",):
             if key in masked:
                 masked[key] = "***"
         return masked
@@ -160,9 +172,18 @@ class GmailIdentityStore:
             return {}
             
         try:
-            return json.loads(settings_json) if settings_json else {}
+            parsed = json.loads(settings_json) if settings_json else {}
         except Exception:
             return {}
+
+        settings, removed_legacy_token = self._drop_legacy_github_token(parsed)
+        if removed_legacy_token:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "UPDATE users SET settings = ? WHERE email = ?",
+                    (json.dumps(settings), normalized_email),
+                )
+        return settings
 
     def update_user_settings(self, email: str, settings: dict[str, Any]) -> dict[str, str]:
         normalized_email = self._normalize_email(email)
@@ -177,15 +198,17 @@ class GmailIdentityStore:
             if revoked:
                 raise ValueError("User not found")
 
-            existing = {}
+            existing: dict[str, Any] = {}
             if existing_settings_json:
                 try:
                     existing = json.loads(existing_settings_json)
                 except Exception:
                     pass
+            existing, removed_legacy_token = self._drop_legacy_github_token(existing)
 
             if sanitized_settings:
                 existing.update(sanitized_settings)
+            if sanitized_settings or removed_legacy_token:
                 conn.execute("UPDATE users SET settings = ? WHERE email = ?", (json.dumps(existing), normalized_email))
 
         return self._masked_settings(existing)
