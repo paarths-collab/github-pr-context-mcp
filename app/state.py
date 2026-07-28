@@ -8,17 +8,28 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
 from urllib.parse import urlparse
+from dotenv import load_dotenv
 
-from auth import GmailIdentityStore, GmailTokenVerifier
-from analytics import UsageMetricsStore
-from storage import (
-    repo_is_indexed_permanently,
-    repo_is_indexed_temporarily,
+from auth import (
+    GmailIdentityStore,
+    GmailTokenVerifier,
+    GitHubAuthorizationRequired,
+    GitHubDeviceFlowService,
+    build_local_github_auth_service,
 )
+from analytics import UsageMetricsStore
+
+
+load_dotenv()
 
 # --- Configuration Constants ---
-USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+USAGE_TRACKING_ENABLED = os.getenv("USAGE_TRACKING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 AUTH_REQUIRED = os.getenv("AUTH_REQUIRED", "false").strip().lower() in {"1", "true", "yes", "on"}
+MCP_RUNTIME_MODE = os.getenv("GITHUB_PR_CONTEXT_RUNTIME", "").strip().lower()
+# Device Flow is only safe in the local stdio process that owns its OS vault.
+# Unknown/direct launch modes deliberately fail closed rather than sharing a
+# machine credential through an accidentally exposed HTTP server.
+LOCAL_GITHUB_DEVICE_FLOW_ENABLED = MCP_RUNTIME_MODE == "local" and not AUTH_REQUIRED
 REGISTRATION_SECRET = os.getenv("REGISTRATION_SECRET", "").strip()
 MCP_PUBLIC_URL = os.getenv("MCP_PUBLIC_URL", "").strip()
 AUTH_REGISTRY_PATH = os.getenv("AUTH_REGISTRY_PATH", "./chroma_db/auth_registry.json")
@@ -29,6 +40,13 @@ USAGE_STATS_PATH = os.getenv("USAGE_STATS_PATH", "./chroma_db/usage_stats.json")
 identity_store = GmailIdentityStore(AUTH_REGISTRY_PATH) if AUTH_REQUIRED else None
 token_verifier = GmailTokenVerifier(identity_store) if identity_store else None
 usage_store = UsageMetricsStore(USAGE_STATS_PATH) if USAGE_TRACKING_ENABLED else None
+# Local GitHub authorization deliberately uses the operating-system vault, never
+# the hosted SQLite settings store. Do not even construct the local credential
+# service in a non-stdio runtime: a hosted process must use a future tenant-aware
+# GitHub App backend instead of a single machine's vault.
+github_auth_service: GitHubDeviceFlowService | None = (
+    build_local_github_auth_service() if LOCAL_GITHUB_DEVICE_FLOW_ENABLED else None
+)
 
 # Stateful per connected client/session
 _sessions: dict[str, dict] = {}
@@ -70,9 +88,21 @@ def current_user_settings() -> dict:
         return identity_store.get_user_settings(email)
     return {}
 
+
+async def get_github_access_token() -> str:
+    """Resolve a GitHub token through the local Device Flow credential boundary."""
+    if not LOCAL_GITHUB_DEVICE_FLOW_ENABLED or github_auth_service is None:
+        raise GitHubAuthorizationRequired(
+            "GitHub PR retrieval is disabled outside the local stdio MCP. This "
+            "v0.3 server does not use a shared local credential; deploy a "
+            "tenant-aware GitHub App backend before enabling hosted retrieval."
+        )
+    return await github_auth_service.get_access_token()
+
 def repo_state_key(repo_key: str, namespace: str | None) -> str:
-    ns = normalize_namespace(namespace) or "_default"
-    return f"{ns}::{repo_key}"
+    ns = normalize_namespace(namespace)
+    scope = "default:" if ns is None else f"namespace:{ns}"
+    return f"{scope}::{repo_key}"
 
 def session_id(ctx: Context) -> str:
     return current_user_email() or ctx.client_id or f"session-{id(ctx.session)}"
@@ -182,6 +212,8 @@ def is_temporary(repo_key: str, namespace: str | None, state: dict) -> bool:
     if known is not None:
         is_temp = (known == "temporary")
     else:
+        from storage import repo_is_indexed_temporarily
+
         is_temp = repo_is_indexed_temporarily(repo_key, namespace=namespace)
 
     if is_temp:

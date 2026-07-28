@@ -4,6 +4,46 @@
 import json
 
 
+def _review_is_bot(review: dict) -> bool:
+    """Return a reviewer's bot flag without relying on an inline comment."""
+    if "is_bot" in review:
+        return bool(review["is_bot"])
+
+    author = review.get("author")
+    if not isinstance(author, str):
+        return False
+
+    normalized_author = author.lower()
+    return (
+        "[bot]" in normalized_author
+        or normalized_author.endswith("-bot")
+        or normalized_author in {"github-actions", "dependabot", "vercel"}
+    )
+
+
+def _extraction_metadata(pr: dict) -> dict:
+    """Preserve whether GitHub returned a complete nested PR record."""
+    truncated = pr.get("truncated_connections") or []
+    if not isinstance(truncated, list):
+        truncated = []
+
+    return {
+        "source_truncated": bool(truncated),
+        "truncated_connections": json.dumps(truncated),
+        "updated_at": pr.get("updated_at", ""),
+    }
+
+
+def _extraction_note(pr: dict) -> str:
+    truncated = pr.get("truncated_connections") or []
+    if not isinstance(truncated, list) or not truncated:
+        return ""
+    return (
+        "\n[Extraction note: GitHub paginated only part of this PR's "
+        f"{', '.join(str(value) for value in truncated)} connection(s).]"
+    )
+
+
 def build_documents(prs: list[dict]) -> tuple[list, list, list]:
     """
     Convert a list of PR dicts into (documents, metadatas, ids)
@@ -13,10 +53,12 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
 
     for pr in prs:
         pr_num = pr["number"]
+        extraction_metadata = _extraction_metadata(pr)
+        extraction_note = _extraction_note(pr)
 
         # PR description
         if pr["body"].strip():
-            docs.append(f"PR #{pr_num}: {pr['title']}\n{pr['body']}")
+            docs.append(f"PR #{pr_num}: {pr['title']}\n{pr['body']}{extraction_note}")
             metadatas.append({
                 "type": "pr_description",
                 "pr_number": pr_num,
@@ -24,6 +66,7 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "author_is_bot": pr.get("author_is_bot", False),
                 "touches_ci": pr.get("touches_ci", False),
                 "files": json.dumps([f["path"] for f in pr["files"]]),
+                **extraction_metadata,
             })
             ids.append(f"pr-{pr_num}-desc")
 
@@ -35,7 +78,7 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
             diff_text = f"\nCode Context:\n{comment['diff_hunk']}" if comment.get("diff_hunk") else ""
             docs.append(
                 f"PR #{pr_num} | File: {comment['file']} | Line: {comment['line']}{diff_text}\n"
-                f"Reviewer ({comment['author']}): {comment['body']}"
+                f"Reviewer ({comment['author']}): {comment['body']}{extraction_note}"
             )
             metadatas.append({
                 "type": "review_comment",
@@ -45,20 +88,24 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "is_bot": comment.get("is_bot", False),
                 "resolved": comment["resolved"],
                 "touches_ci": pr.get("touches_ci", False),
+                **extraction_metadata,
             })
-            ids.append(f"pr-{pr_num}-comment-{i}")
+            comment_id = comment.get("github_node_id") or str(i)
+            ids.append(f"pr-{pr_num}-comment-{comment_id}")
 
         # Commit messages
         for i, commit in enumerate(pr.get("commits", [])):
             if not commit["message"].strip():
                 continue
-            docs.append(f"PR #{pr_num} Commit: {commit['message']}")
+            docs.append(f"PR #{pr_num} Commit: {commit['message']}{extraction_note}")
             metadatas.append({
                 "type": "commit_message",
                 "pr_number": pr_num,
                 "touches_ci": pr.get("touches_ci", False),
+                **extraction_metadata,
             })
-            ids.append(f"pr-{pr_num}-commit-{i}")
+            commit_id = commit.get("oid") or str(i)
+            ids.append(f"pr-{pr_num}-commit-{commit_id}")
 
         # Overall review summaries (only those with written body)
         for i, review in enumerate(pr["reviews"]):
@@ -66,16 +113,18 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 continue
             docs.append(
                 f"PR #{pr_num} overall review by {review['author']} "
-                f"[{review['state']}]: {review['body']}"
+                f"[{review['state']}]: {review['body']}{extraction_note}"
             )
             metadatas.append({
                 "type": "review_summary",
                 "pr_number": pr_num,
                 "state": review["state"],
                 "author": review["author"],
-                "is_bot": comment.get("is_bot", False), # Approximation
+                "is_bot": _review_is_bot(review),
                 "touches_ci": pr.get("touches_ci", False),
+                **extraction_metadata,
             })
-            ids.append(f"pr-{pr_num}-review-{i}")
+            review_id = review.get("github_node_id") or str(i)
+            ids.append(f"pr-{pr_num}-review-{review_id}")
 
     return docs, metadatas, ids

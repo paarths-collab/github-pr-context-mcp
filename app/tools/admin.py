@@ -13,13 +13,12 @@ from app.state import (
 def register_admin_tools(mcp):
     @mcp.tool(name="update_settings")
     async def update_settings(
-        github_token: str | None = None,
         llm_provider: str | None = None,
         llm_model: str | None = None,
         llm_api_key: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Update your personal configuration (GitHub token, LLM provider/model/key)."""
+        """Update legacy hosted model settings; GitHub tokens are never accepted here."""
         if not AUTH_REQUIRED or identity_store is None:
             return "Warning: This server is in Local Mode. To update your settings, please update your environment variables or IDE configuration (e.g. claude_desktop_config.json)."
 
@@ -31,7 +30,6 @@ def register_admin_tools(mcp):
             return "Error: Could not identify your user identity. Are you logged in via Bearer token?"
 
         new_settings = {}
-        if github_token: new_settings["github_token"] = github_token
         if llm_provider: new_settings["llm_provider"] = llm_provider
         if llm_model: new_settings["llm_model"] = llm_model
         if llm_api_key: new_settings["llm_api_key"] = llm_api_key

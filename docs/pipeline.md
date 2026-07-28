@@ -1,112 +1,58 @@
-# Pipeline Deep Dive
+# v0.3 Pure-Context Pipeline
 
-<div align="center">
+The server retrieves historical evidence. The connected IDE agent turns that evidence into a review, code change, test plan, or instruction file.
 
-![Pipelines](https://img.shields.io/badge/Diagrams-Deep%20Dive-blue)
-![Mermaid](https://img.shields.io/badge/Format-Mermaid-green)
-
-**End-to-end operational flows for indexing, retrieval, and grounded review generation.**
-
-</div>
-
----
-
-## Table of Contents
-
-- [Query Flow](#query-flow)
-- [Indexing Flow](#indexing-flow)
-- [Retrieval and Generation Flow](#retrieval-and-generation-flow)
-
----
-
-## Query Flow
-
-This flow shows request-time retrieval and response generation for grounded code review.
+## Indexing
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant C as MCP Client
-    participant S as MCP Server
-    participant V as Vector Store
-    participant L as LLM Provider
-
-    U->>C: Review this diff using team history
-    C->>S: review_code_with_history(code, repo?)
-    S->>V: query_similar(code, n_results=10)
-    V-->>S: matched historical documents
-    S->>S: assemble grounded prompt (top 6)
-    S->>L: chat(messages, system, max_tokens)
-    L-->>S: context-aware review
-    S-->>C: review response
-    C-->>U: final grounded review
-```
-
----
-
-## Indexing Flow
-
-This flow shows repository indexing when context is missing from local storage.
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant C as MCP Client
+    participant A as IDE agent
+    participant AU as Local GitHub authorization
     participant S as ensure_repo_ready
     participant G as GitHub GraphQL
-    participant T as Transformer
-    participant B as Document Builder
-    participant E as Encoder
-    participant D as ChromaDB
+    participant T as Transform and document builder
+    participant E as Local embedding model
+    participant C as ChromaDB
 
-    U->>C: Load repository context
-    C->>S: ensure_repo_ready(repo, storage, pages)
-    S->>S: check permanent/temporary index state
-    alt Already Indexed
-        S-->>C: activate existing repo context
-    else Not Indexed
-        S-->>C: acknowledge and start background thread
-        loop Background Process
-            S->>G: fetch PR pages (up to 100 max fidelity)
-            G-->>S: PR nodes + review threads + reviews
-            S->>T: flatten_prs(nodes)
-            T-->>S: normalized PR objects
-            S->>B: build_documents(prs)
-            B-->>S: docs + metadata (namespace isolated)
-            S->>E: encode each doc
-            E-->>S: embeddings
-            S->>D: upsert into owner--repo collection
-        end
-    end
+    A->>AU: get_github_connection_status
+    AU-->>A: connected or Device Flow required
+    A->>S: ensure_repo_ready(repo, storage, pages, refresh?)
+    S-->>A: Existing-index state or indexing acknowledgement
+    S->>G: Fetch newest-first PR history in background
+    G-->>S: PRs, reviews, comments, files
+    S->>T: Normalize and build documents
+    T->>E: Encode documents
+    E->>C: Store embeddings and metadata
+    A->>S: get_index_stats()
+    S-->>A: Document count, job status, freshness, and truncation data
 ```
 
----
+`ensure_repo_ready` starts background indexing when needed. Call it with `refresh=true` to synchronise an existing index using the GitHub `updatedAt` watermark. Use `get_index_stats` to verify that documents are available before depending on a newly requested index; its `index_job` exposes queued/running/ready/failed state and any `truncated_connections`.
 
-## Retrieval and Generation Flow
-
-This flow summarizes the core RAG loop used during review generation.
+## Retrieval and reasoning
 
 ```mermaid
-flowchart TD
-    A[Incoming code or diff] --> B[Embed query text]
-    B --> C[Vector similarity search]
-    C --> D[Top N retrieved artifacts]
-    D --> E[Context window selection]
-    E --> F[Prompt assembly with review system rules]
-    F --> G[Provider adapter call]
-    G --> H[LLM review output]
-    H --> I[Return response to client]
+sequenceDiagram
+    participant U as Developer
+    participant A as IDE agent
+    participant S as MCP retrieval tool
+    participant C as ChromaDB
+
+    U->>A: Review or implementation request
+    A->>S: review_code_with_history / relevant tool
+    S->>C: Semantic search
+    C-->>S: Historical documents and metadata
+    S-->>A: JSON context material
+    A->>A: Validate evidence against current code
+    A-->>U: Review, code, tests, or instructions
 ```
 
-### Operational Notes
+The retrieval response may include an instruction field describing a useful task, but it is still historical context. The IDE agent decides whether it applies and produces the final result.
 
-| Stage | Current Behavior | Practical Impact |
-|---|---|---|
-| Retrieval depth | `n_results=10` from vector search | Strong recall with manageable token budget |
-| Prompt context | Top 6 matches used in review prompt | Keeps output focused and grounded |
-| Similarity score | Derived from cosine distance (`1 - distance`) | Easier ranking interpretation |
-| Storage mode | Permanent or ephemeral | Flexible trade-off between speed and persistence |
+## Operational limits
 
----
+- Indexing is bounded by the `pages` argument and the GitHub API response shape. When a top-level or nested connection is incomplete, v3 records `truncated_connections` alongside the evidence instead of silently treating it as complete.
+- A historical pattern can become stale; compare it with current code and project instructions.
+- The local embedding model supports semantic search. It does not replace the IDE agent's reasoning model.
 
 Back to [README](../README.md)

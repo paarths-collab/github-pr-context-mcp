@@ -30,6 +30,8 @@ def encode(text: str) -> list[float]:
 
 
 def encode_batch(texts: list[str]) -> list[list[float]]:
-    """Encode a list of strings into vectors in one pass."""
+    """Encode a batch in one model call instead of per-document inference."""
+    if not texts:
+        return []
     model = _get_model()
-    return [model.encode(t).tolist() for t in texts]
+    return model.encode(texts).tolist()

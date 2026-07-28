@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "paarths-collab/github-pr-context-mcp",
-  "title": "GitHub PR Review Context",
-  "description": "AI code review grounded in your repo history. Supports Test Gen and Security Audits.",
-  "version": "0.2.9",
+  "title": "GitHub PR Context",
+  "description": "Retrieves GitHub pull-request history as context material; the connected IDE agent performs the reasoning.",
+  "version": "0.3.0",
   "repository": {
     "source": "github",
     "url": "https://github.com/paarths-collab/github-pr-context-mcp"
@@ -16,6 +16,6 @@
   "capabilities": {
     "tools": true,
     "resources": false,
-    "prompts": true
+    "prompts": false
   }
 }

@@ -1,4 +1,4 @@
-# Raw GraphQL response → clean Python dicts.
+# Raw GraphQL response -> clean Python dicts.
 # No HTTP calls, no ChromaDB, no embedding logic here.
 
 MAX_DIFF_SIZE = 100 * 1024  # 100KB per hunk
@@ -16,82 +16,152 @@ CI_PATTERNS = [
     "jenkinsfile",
 ]
 
+
 def _is_bot(login: str) -> bool:
     """Heuristic to detect if a login belongs to a bot."""
-    if not login: return False
-    l = login.lower()
-    return "[bot]" in l or l.endswith("-bot") or l in {"github-actions", "dependabot", "vercel"}
+    if not login:
+        return False
+    normalized = login.lower()
+    return (
+        "[bot]" in normalized
+        or normalized.endswith("-bot")
+        or normalized in {"github-actions", "dependabot", "vercel"}
+    )
+
+
+def _text(value: object) -> str:
+    """Return API text safely without turning nulls into the literal 'None'."""
+    return value if isinstance(value, str) else ""
+
+
+def _connection_nodes(connection: object, path: str, truncated: list[str]) -> list[dict]:
+    """Read a nullable GitHub connection and disclose a nested page cap."""
+    if not isinstance(connection, dict):
+        return []
+
+    page_info = connection.get("pageInfo")
+    if isinstance(page_info, dict) and page_info.get("hasNextPage") and path not in truncated:
+        truncated.append(path)
+
+    nodes = connection.get("nodes")
+    return nodes if isinstance(nodes, list) else []
+
+
+def _login(actor: object) -> str:
+    if isinstance(actor, dict):
+        login = actor.get("login")
+        if isinstance(login, str) and login:
+            return login
+    return "ghost"
+
 
 def flatten_pr(raw_pr: dict) -> dict:
-    """Convert a single raw GraphQL PR node into a clean, flat dict with input guards."""
+    """Convert a raw GitHub PR node into a guarded, disclosure-rich record."""
+    if not isinstance(raw_pr, dict):
+        raise ValueError("GitHub returned a pull request node that is not an object.")
+
+    truncated_connections: list[str] = []
+    raw_files = _connection_nodes(raw_pr.get("files"), "files", truncated_connections)
     files = [
         {
-            "path": f["path"],
-            "additions": f["additions"],
-            "deletions": f["deletions"],
-            "change_type": f["changeType"],
+            "path": _text(file.get("path")),
+            "additions": file.get("additions", 0),
+            "deletions": file.get("deletions", 0),
+            "change_type": _text(file.get("changeType")),
         }
-        for f in raw_pr["files"]["nodes"]
+        for file in raw_files
+        if isinstance(file, dict)
     ]
-    
-    # Priority 3: CI/CD diff awareness
+
     touches_ci = any(
-        any(pat in f["path"] for pat in CI_PATTERNS)
-        for f in files
+        any(pattern in file["path"] for pattern in CI_PATTERNS)
+        for file in files
     )
 
     review_comments = []
-    for thread in raw_pr["reviewThreads"]["nodes"]:
-        for comment in thread["comments"]["nodes"]:
-            diff_hunk = thread.get("diffHunk", "")
-            if len(diff_hunk) > MAX_DIFF_SIZE:
-                diff_hunk = diff_hunk[:MAX_DIFF_SIZE] + "\n... [diff truncated due to size] ..."
+    raw_threads = _connection_nodes(
+        raw_pr.get("reviewThreads"), "reviewThreads", truncated_connections
+    )
+    for thread in raw_threads:
+        if not isinstance(thread, dict):
+            continue
+        raw_comments = _connection_nodes(
+            thread.get("comments"), "reviewThreads.comments", truncated_connections
+        )
+        diff_hunk = _text(thread.get("diffHunk"))
+        if len(diff_hunk) > MAX_DIFF_SIZE:
+            diff_hunk = diff_hunk[:MAX_DIFF_SIZE] + "\n... [diff truncated due to size] ..."
 
-            author_login = comment["author"]["login"] if comment["author"] else "ghost"
+        for comment in raw_comments:
+            if not isinstance(comment, dict):
+                continue
+            author_login = _login(comment.get("author"))
             review_comments.append({
-                "file": thread["path"],
-                "line": thread["line"],
-                "resolved": thread["isResolved"],
+                "github_node_id": _text(comment.get("id")),
+                "file": _text(thread.get("path")),
+                "line": thread.get("line"),
+                "resolved": bool(thread.get("isResolved")),
                 "author": author_login,
                 "is_bot": _is_bot(author_login),
-                "body": comment["body"],
-                "created_at": comment["createdAt"],
+                "body": _text(comment.get("body")),
+                "created_at": _text(comment.get("createdAt")),
                 "diff_hunk": diff_hunk,
             })
 
-    body = raw_pr["body"] or ""
+    body = _text(raw_pr.get("body"))
     if len(body) > MAX_BODY_SIZE:
         body = body[:MAX_BODY_SIZE] + "\n... [body truncated due to size] ..."
 
-    author_login = raw_pr["author"]["login"] if raw_pr["author"] else "ghost"
+    author_login = _login(raw_pr.get("author"))
+    raw_commits = _connection_nodes(raw_pr.get("commits"), "commits", truncated_connections)
+    commits = []
+    for commit_node in raw_commits:
+        commit = commit_node.get("commit") if isinstance(commit_node, dict) else None
+        if isinstance(commit, dict):
+            commits.append({
+                "oid": _text(commit.get("oid")),
+                "message": _text(commit.get("message")),
+            })
+
+    raw_reviews = _connection_nodes(raw_pr.get("reviews"), "reviews", truncated_connections)
+    reviews = []
+    for review in raw_reviews:
+        if not isinstance(review, dict):
+            continue
+        reviewer = _login(review.get("author"))
+        reviews.append({
+            "github_node_id": _text(review.get("id")),
+            "author": reviewer,
+            "is_bot": _is_bot(reviewer),
+            "state": _text(review.get("state")),
+            "body": _text(review.get("body")),
+            "submitted_at": _text(review.get("submittedAt")),
+        })
+
+    created_at = _text(raw_pr.get("createdAt"))
+    updated_at = _text(raw_pr.get("updatedAt")) or created_at
     return {
+        "github_node_id": _text(raw_pr.get("id")),
         "number": raw_pr["number"],
-        "title": raw_pr["title"],
+        "title": _text(raw_pr.get("title")),
         "body": body,
         "author": author_login,
         "author_is_bot": _is_bot(author_login),
         "touches_ci": touches_ci,
-        "created_at": raw_pr["createdAt"],
-        "merged_at": raw_pr["mergedAt"],
-        "additions": raw_pr["additions"],
-        "deletions": raw_pr["deletions"],
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "merged_at": _text(raw_pr.get("mergedAt")) or None,
+        "state": _text(raw_pr.get("state")),
+        "additions": raw_pr.get("additions", 0),
+        "deletions": raw_pr.get("deletions", 0),
         "files": files,
         "review_comments": review_comments,
-        "commits": [
-            {"message": c["commit"]["message"]}
-            for c in raw_pr["commits"]["nodes"]
-        ],
-        "reviews": [
-            {
-                "author": r["author"]["login"] if r["author"] else "ghost",
-                "state": r["state"],
-                "body": r["body"] or "",
-                "submitted_at": r["submittedAt"],
-            }
-            for r in raw_pr["reviews"]["nodes"]
-        ],
+        "commits": commits,
+        "reviews": reviews,
+        "truncated_connections": truncated_connections,
     }
 
+
 def flatten_prs(nodes: list[dict]) -> list[dict]:
-    """Flatten a list of raw GraphQL PR nodes."""
+    """Flatten a list of raw GitHub PR nodes."""
     return [flatten_pr(pr) for pr in nodes]

@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.paarths-collab/github-pr-context-mcp",
-  "title": "GitHub PR Review Context",
-  "description": "Hardened Pure Context Engine for AI code reviews grounded in your repo history.",
+  "title": "GitHub PR Context",
+  "description": "Retrieves GitHub pull-request history as context material; the connected IDE agent performs the reasoning.",
   "version": "0.3.0",
   "repository": {
     "source": "github",
@@ -16,6 +16,6 @@
   "capabilities": {
     "tools": true,
     "resources": false,
-    "prompts": true
+    "prompts": false
   }
 }
