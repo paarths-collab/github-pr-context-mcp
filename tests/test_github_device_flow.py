@@ -247,6 +247,14 @@ def test_official_release_can_bundle_a_public_app_without_user_environment(monke
     assert config.installation_url == "https://github.com/apps/github-pr-context/installations/new"
 
 
+def test_official_product_app_metadata_is_configured():
+    """The release must not silently revert to an unconfigured GitHub App."""
+    app = product_github_app.get_product_github_app()
+
+    assert app.client_id == "Iv23likgLw8eHiUMIsnT"
+    assert app.slug == "pr-context-mcp"
+
+
 def test_personal_environment_token_is_not_a_local_v3_fallback(monkeypatch):
     monkeypatch.delenv("GITHUB_APP_CLIENT_ID", raising=False)
     monkeypatch.delenv("GITHUB_APP_SLUG", raising=False)
