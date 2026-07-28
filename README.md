@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
 ![Version](https://img.shields.io/badge/version-0.3.1-green)
-![Downloads](https://img.shields.io/badge/downloads-5k%2B-blue)
+![Downloads](https://img.shields.io/badge/downloads-8k%2B-blue)
 
 GitHub PR Context MCP is a **v0.3.1 pure-context** MCP server. It retrieves relevant material from a repository's historical pull requests and returns it to an IDE agent. The IDE agent—not this server—does the reasoning, review, code generation, testing, and file edits.
 
@@ -259,6 +259,11 @@ The GitHub Actions workflow currently runs one Ubuntu/Python 3.10 job with the f
 - [GitHub App Device Flow](docs/guides/github-app-device-flow.md)
 - [Architecture](docs/architecture.md)
 - [Tool strategy](docs/tools_strategy.md)
+
+## Feedback
+
+- **Feedback**: Please open an issue or start a discussion if you have ideas or encounter bugs.
+- **Star ⭐**: If this tool saves you time, give it a star!
 
 ## License
 
