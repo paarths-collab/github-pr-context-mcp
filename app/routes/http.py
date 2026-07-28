@@ -41,7 +41,6 @@ def register_http_routes(mcp):
         return JSONResponse({
             "email": access_token.client_id,
             "scopes": access_token.scopes,
-            "has_custom_github_token": bool(user_settings.get("github_token")),
             "has_custom_llm": any(user_settings.get(k) for k in ("llm_provider", "llm_model", "llm_api_key", "llm_base_url")),
         })
 

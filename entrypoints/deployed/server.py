@@ -3,6 +3,16 @@ import sys
 import time
 import threading
 import requests
+
+
+# v0.3 has no tenant-aware hosted GitHub credential backend. A deployment must
+# always run its HTTP transport behind the existing bearer-token auth layer and
+# must never opt into the local OS-vault Device Flow code path.
+if os.getenv("AUTH_REQUIRED", "true").strip().lower() not in {"1", "true", "yes", "on"}:
+    raise RuntimeError("The deployed v0.3 MCP requires AUTH_REQUIRED=true.")
+os.environ["AUTH_REQUIRED"] = "true"
+os.environ["GITHUB_PR_CONTEXT_RUNTIME"] = "hosted"
+
 from app.mcp_app import mcp
 
 def _run_keep_alive():

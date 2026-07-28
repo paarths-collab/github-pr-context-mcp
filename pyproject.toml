@@ -8,12 +8,20 @@ authors = [
   {name = "Paarth Gala"}
 ]
 dependencies = [
-    "mcp",
-    "chromadb",
-    "sentence-transformers",
-    "python-dotenv",
-    "requests",
-    "tenacity"
+    "mcp>=1.27.2,<2.0",
+    "chromadb==0.5.0",
+    "sentence-transformers==2.7.0",
+    "python-dotenv==1.0.1",
+    "requests==2.31.0",
+    "tenacity==8.2.3",
+    "httpx>=0.27.1,<1.0",
+    "starlette>=0.27",
+    "keyring>=25.0,<26.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.2.0",
 ]
 
 [project.scripts]
@@ -34,4 +42,12 @@ include = [
     "storage*",
     "fetcher*",
     "entrypoints*",
+]
+
+[tool.setuptools.data-files]
+"share/github-pr-context-mcp/skills/github-pr-context-v3" = [
+    ".agents/skills/github-pr-context-v3/SKILL.md",
+]
+"share/github-pr-context-mcp/skills/github-pr-context-v3/agents" = [
+    ".agents/skills/github-pr-context-v3/agents/openai.yaml",
 ]
