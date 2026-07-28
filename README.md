@@ -3,6 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
 ![Version](https://img.shields.io/badge/version-0.3.0-green)
+![Downloads](https://img.shields.io/badge/downloads-5k%2B-blue)
 
 GitHub PR Context MCP is a **v0.3.0 pure-context** MCP server. It indexes GitHub pull-request history and returns relevant historical material to an IDE agent. The IDE agent, not this server, performs the reasoning, review, code generation, and file edits.
 
