@@ -24,13 +24,6 @@ mcp-publisher
 mcp-publisher.exe
 mcp-publisher.tar.gz
 
-# Generated output: logs and eval-harness results
+# Generated output: logs, and the results scripts/eval_harness.py writes
 *.log
-benchmarks/eval_results_*.csv
-benchmarks/eval_summary_*.json
-
-# Re-fetchable PR corpus cache (1MB+); rebuild with --fetch
-benchmarks/replay_corpus_*.json
-
-# Verbatim duplicates of patches/ under neutral names; rebuild with --blind-claude
-benchmarks/claude_run/blind/
+benchmarks/
