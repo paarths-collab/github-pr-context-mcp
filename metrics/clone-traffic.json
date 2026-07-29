@@ -1,0 +1,300 @@
+{
+  "repo": "paarths-collab/github-pr-context-mcp",
+  "generated_at": "2026-07-28T18:55:25.650422+00:00",
+  "source": "GitHub repository traffic API (/traffic/clones)",
+  "window": {
+    "first_day": "2026-05-19",
+    "last_day": "2026-07-27",
+    "days_recorded": 51,
+    "missing_days": [
+      "2026-06-11",
+      "2026-06-26",
+      "2026-06-27",
+      "2026-06-28",
+      "2026-06-29",
+      "2026-06-30",
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+      "2026-07-09",
+      "2026-07-10",
+      "2026-07-11",
+      "2026-07-12",
+      "2026-07-13"
+    ],
+    "note": "GitHub retains only 14 days. Days absent from missing_days but outside the current window were captured by an earlier run."
+  },
+  "totals": {
+    "clones": 342,
+    "sum_of_daily_unique_cloners": 159,
+    "note": "unique_cloners is GitHub's per-day IP-based count. Summing it across days double-counts anyone who cloned on more than one day, so the total is an upper bound, not a distinct-person count."
+  },
+  "last_14_recorded_days": {
+    "first_day": "2026-07-14",
+    "last_day": "2026-07-27",
+    "clones": 55,
+    "sum_of_daily_unique_cloners": 38
+  },
+  "daily": [
+    {
+      "date": "2026-05-19",
+      "clones": 4,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-05-20",
+      "clones": 6,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-21",
+      "clones": 7,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-22",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-23",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-24",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-05-25",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-26",
+      "clones": 6,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-05-27",
+      "clones": 7,
+      "unique_cloners": 3
+    },
+    {
+      "date": "2026-05-28",
+      "clones": 10,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-05-29",
+      "clones": 0,
+      "unique_cloners": 0
+    },
+    {
+      "date": "2026-05-30",
+      "clones": 2,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-05-31",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-06-01",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-02",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-03",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-06-04",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-05",
+      "clones": 3,
+      "unique_cloners": 3
+    },
+    {
+      "date": "2026-06-06",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-07",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-08",
+      "clones": 5,
+      "unique_cloners": 3
+    },
+    {
+      "date": "2026-06-09",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-10",
+      "clones": 7,
+      "unique_cloners": 5
+    },
+    {
+      "date": "2026-06-12",
+      "clones": 5,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-06-13",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-06-14",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-15",
+      "clones": 5,
+      "unique_cloners": 5
+    },
+    {
+      "date": "2026-06-16",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-06-17",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-06-18",
+      "clones": 5,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-06-19",
+      "clones": 2,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-06-20",
+      "clones": 23,
+      "unique_cloners": 10
+    },
+    {
+      "date": "2026-06-21",
+      "clones": 43,
+      "unique_cloners": 12
+    },
+    {
+      "date": "2026-06-22",
+      "clones": 72,
+      "unique_cloners": 20
+    },
+    {
+      "date": "2026-06-23",
+      "clones": 19,
+      "unique_cloners": 7
+    },
+    {
+      "date": "2026-06-24",
+      "clones": 5,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-06-25",
+      "clones": 19,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-07-14",
+      "clones": 5,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-07-15",
+      "clones": 7,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-16",
+      "clones": 4,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-17",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-18",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-19",
+      "clones": 1,
+      "unique_cloners": 1
+    },
+    {
+      "date": "2026-07-20",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-21",
+      "clones": 5,
+      "unique_cloners": 3
+    },
+    {
+      "date": "2026-07-22",
+      "clones": 3,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-23",
+      "clones": 6,
+      "unique_cloners": 5
+    },
+    {
+      "date": "2026-07-24",
+      "clones": 7,
+      "unique_cloners": 6
+    },
+    {
+      "date": "2026-07-25",
+      "clones": 2,
+      "unique_cloners": 2
+    },
+    {
+      "date": "2026-07-26",
+      "clones": 5,
+      "unique_cloners": 4
+    },
+    {
+      "date": "2026-07-27",
+      "clones": 1,
+      "unique_cloners": 1
+    }
+  ]
+}

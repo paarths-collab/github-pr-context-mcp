@@ -27,7 +27,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -268,6 +268,77 @@ def print_summary(conn: sqlite3.Connection, days: int = 14) -> None:
     print(f"\n{'='*62}\n")
 
 
+# ── Export ────────────────────────────────────────────────────────────────────
+
+EXPORT_PATH = Path(__file__).parent / "metrics" / "clone-traffic.json"
+
+
+def export_clone_traffic(conn: sqlite3.Connection, path: Path = EXPORT_PATH) -> dict:
+    """Write the full recorded clone history to a JSON file.
+
+    GitHub's traffic API only serves a rolling 14-day window, so anything older
+    exists nowhere else once it ages out of the local database. Committing this
+    file is what turns a disappearing window into a permanent record — which
+    also means a day never fetched is a day lost for good, so the export names
+    its gaps rather than presenting the series as continuous.
+    """
+    rows = conn.execute(
+        "SELECT date, total, uniques FROM github_clones ORDER BY date ASC"
+    ).fetchall()
+
+    daily = [
+        {"date": r["date"], "clones": r["total"], "unique_cloners": r["uniques"]}
+        for r in rows
+    ]
+
+    gaps: list[str] = []
+    if daily:
+        first = datetime.strptime(daily[0]["date"], "%Y-%m-%d").date()
+        last = datetime.strptime(daily[-1]["date"], "%Y-%m-%d").date()
+        recorded = {d["date"] for d in daily}
+        for offset in range((last - first).days + 1):
+            day = (first + timedelta(days=offset)).isoformat()
+            if day not in recorded:
+                gaps.append(day)
+
+    recent = daily[-14:]
+    payload = {
+        "repo": f"{REPO_OWNER}/{REPO_NAME}",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": "GitHub repository traffic API (/traffic/clones)",
+        "window": {
+            "first_day": daily[0]["date"] if daily else None,
+            "last_day": daily[-1]["date"] if daily else None,
+            "days_recorded": len(daily),
+            "missing_days": gaps,
+            "note": (
+                "GitHub retains only 14 days. Days absent from missing_days but "
+                "outside the current window were captured by an earlier run."
+            ),
+        },
+        "totals": {
+            "clones": sum(d["clones"] for d in daily),
+            "sum_of_daily_unique_cloners": sum(d["unique_cloners"] for d in daily),
+            "note": (
+                "unique_cloners is GitHub's per-day IP-based count. Summing it "
+                "across days double-counts anyone who cloned on more than one "
+                "day, so the total is an upper bound, not a distinct-person count."
+            ),
+        },
+        "last_14_recorded_days": {
+            "first_day": recent[0]["date"] if recent else None,
+            "last_day": recent[-1]["date"] if recent else None,
+            "clones": sum(d["clones"] for d in recent),
+            "sum_of_daily_unique_cloners": sum(d["unique_cloners"] for d in recent),
+        },
+        "daily": daily,
+    }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -277,6 +348,8 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="Output raw JSON instead of table")
     parser.add_argument("--no-fetch", action="store_true",
                         help="Skip fetching new data, just show DB contents")
+    parser.add_argument("--export", nargs="?", const=str(EXPORT_PATH), metavar="PATH",
+                        help=f"Write full clone history to JSON (default: {EXPORT_PATH})")
     args = parser.parse_args()
 
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -314,6 +387,17 @@ def main() -> None:
         print(json.dumps({"github_clones": clones, "pypi_downloads": pypi_rows}, indent=2))
     else:
         print_summary(conn, days=args.history)
+
+    if args.export:
+        payload = export_clone_traffic(conn, Path(args.export))
+        window, totals = payload["window"], payload["totals"]
+        print(f"  Exported {window['days_recorded']} days to {args.export}")
+        print(f"    {window['first_day']} -> {window['last_day']}, "
+              f"{totals['clones']:,} clones")
+        if window["missing_days"]:
+            print(f"    [!] {len(window['missing_days'])} day(s) missing inside that "
+                  f"range and unrecoverable: {', '.join(window['missing_days'][:5])}"
+                  f"{' ...' if len(window['missing_days']) > 5 else ''}")
 
 
 if __name__ == "__main__":

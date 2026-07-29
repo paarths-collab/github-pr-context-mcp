@@ -28,3 +28,6 @@ mcp-publisher.tar.gz
 *.log
 benchmarks/eval_results_*.csv
 benchmarks/eval_summary_*.json
+
+# Re-fetchable PR corpus cache (1MB+); rebuild with --fetch
+benchmarks/replay_corpus_*.json
