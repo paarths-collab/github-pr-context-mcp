@@ -41,7 +41,6 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
             isResolved
             path
             line
-            diffHunk
             comments(first: 50) {
               pageInfo { hasNextPage }
               nodes {
@@ -49,6 +48,7 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
                 author { login }
                 body
                 createdAt
+                diffHunk
               }
             }
           }
