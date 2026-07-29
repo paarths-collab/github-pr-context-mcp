@@ -88,13 +88,21 @@ def flatten_pr(raw_pr: dict) -> dict:
         raw_comments = _connection_nodes(
             thread.get("comments"), "reviewThreads.comments", truncated_connections
         )
-        diff_hunk = _text(thread.get("diffHunk"))
-        if len(diff_hunk) > MAX_DIFF_SIZE:
-            diff_hunk = diff_hunk[:MAX_DIFF_SIZE] + "\n... [diff truncated due to size] ..."
+        # GitHub exposes diffHunk on the review *comment*, not on the thread. A
+        # reply in the thread can omit it, so the first anchored hunk in the
+        # thread stands in for the whole conversation.
+        thread_hunk = ""
+        for comment in raw_comments:
+            if isinstance(comment, dict) and _text(comment.get("diffHunk")):
+                thread_hunk = _text(comment.get("diffHunk"))
+                break
 
         for comment in raw_comments:
             if not isinstance(comment, dict):
                 continue
+            diff_hunk = _text(comment.get("diffHunk")) or thread_hunk
+            if len(diff_hunk) > MAX_DIFF_SIZE:
+                diff_hunk = diff_hunk[:MAX_DIFF_SIZE] + "\n... [diff truncated due to size] ..."
             author_login = _login(comment.get("author"))
             review_comments.append({
                 "github_node_id": _text(comment.get("id")),
