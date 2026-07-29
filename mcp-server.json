@@ -3,7 +3,7 @@
   "name": "paarths-collab/github-pr-context-mcp",
   "title": "GitHub PR Context",
   "description": "Retrieves GitHub pull-request history as context material; the connected IDE agent performs the reasoning.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "repository": {
     "source": "github",
     "url": "https://github.com/paarths-collab/github-pr-context-mcp"

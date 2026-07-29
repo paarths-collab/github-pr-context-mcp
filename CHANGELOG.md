@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-29
+
+### Fixed
+- **PR indexing worked in no published release.** `PR_QUERY` selected `diffHunk` on
+  `PullRequestReviewThread`, a field GitHub defines only on
+  `PullRequestReviewComment`. GitHub rejected the whole query with
+  `undefinedField`, so every fetch failed before a single PR was indexed. Anyone
+  running 0.3.0 or 0.3.1 could not index any repository. `flatten_pr` now reads
+  the hunk from each comment, falling back to the first anchored hunk in the
+  thread when a reply omits it, and `tests/test_queries_schema.py` guards the
+  field's placement so the query text cannot silently drift from GitHub's schema
+  again.
+- Webhook indexing no longer advances the GitHub refresh watermark. A webhook
+  delivers one PR rather than a complete newest-first sweep, so advancing the
+  watermark let the next refresh skip anything updated earlier but not yet
+  indexed.
+- Webhook indexing drives an explicitly owned asyncio loop instead of the
+  one-shot runner, which raised `RuntimeError` when the handler thread already
+  had a running loop.
+- Review-summary bot metadata no longer reads a variable left over from the
+  inline-comment loop, which had tagged every summary with the last inline
+  comment's bot flag.
+- `python -m pytest` from the repository root no longer collects scratch helpers
+  whose filenames match pytest's default `*_test.py` pattern.
+- Legacy hosted GitHub token values are no longer returned through settings updates.
+- A deleted index can no longer be recreated by a late background job.
+- Capped refreshes no longer advance their GitHub watermark before all pages are
+  processed.
+
 ### Added
+- Optional standalone webhook listener
+  ([`entrypoints/webhook_server.py`](entrypoints/webhook_server.py)) that indexes
+  a PR into permanent storage as soon as it merges. It runs outside the
+  local-stdio Device Flow path and reads its own `GITHUB_TOKEN`.
+- Comment-quality filtering that keeps low-signal review chatter out of the
+  embedding index.
+- PR diff extraction, review clustering, and a retrieval eval harness.
+- PR replay benchmark ([`scripts/pr_replay_benchmark.py`](scripts/pr_replay_benchmark.py))
+  that replays already-merged PRs, where the real diff is ground truth, and
+  scores an agent with and without retrieved history. It reports **no
+  statistically demonstrated effect**: the measured gap is smaller than the
+  judge's own disagreement between presentation orders. See
+  [`benchmarks/README.md`](benchmarks/README.md).
+- Clone-traffic export (`track_growth.py --export`) writing `metrics/clone-traffic.json`,
+  preserving history past GitHub's rolling 14-day traffic window and naming its
+  own gaps rather than presenting the series as continuous.
 - Local GitHub App Device Flow with OS-vault-only credentials and token-free MCP tools.
 - A v3 IDE skill that treats PR history as untrusted retrieval evidence and keeps reasoning in the connected IDE agent.
 - Asynchronous index-job status, durable capped-refresh continuation, and deletion invalidation for in-flight jobs.
@@ -17,11 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The server is retrieval-only: it no longer presents server-side LLM generation or review as a product capability.
 - PR extraction uses forward `updatedAt` pagination, stable GitHub node IDs, batch embeddings, and explicit truncation disclosure.
 - Local namespaces use separate scoped collections; hosted GitHub retrieval remains disabled until a tenant-aware backend exists.
+- Documentation is diagram-first: the README now carries the trust boundary,
+  Device Flow handshake, connection and index-job state machines, page-cap
+  arithmetic and tool surface as diagrams rather than prose.
 
-### Fixed
-- Prevented legacy hosted GitHub token values from being returned through settings updates.
-- Prevented a deleted index from being recreated by a late background job.
-- Prevented capped refreshes from advancing their GitHub watermark before all pages are processed.
+### Note on versioning
+
+This is numbered as a patch release, but it is the first release to contain the
+v3 work: `v0.3.1` was tagged before that merge, so everything above ships here
+for the first time. Replacing personal access tokens with GitHub App Device Flow
+is a breaking change to how the server authenticates, and anyone upgrading from
+0.3.0 or 0.3.1 must reconnect GitHub and run `migrate-storage`.
 
 ## [0.3.0] - 2024-05-08
 
