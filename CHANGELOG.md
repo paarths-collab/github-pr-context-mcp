@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- The `benchmarks/` directory and the PR replay harness that produced it. The
+  benchmark reported no statistically demonstrated effect on ten tasks, which is
+  too little to conclude anything either way, so keeping the apparatus in the
+  repository implied a claim the data did not support. `scripts/eval_harness.py`
+  remains for retrieval-quality experiments.
+
 ## [0.3.2] - 2026-07-29
 
 ### Fixed
@@ -44,12 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comment-quality filtering that keeps low-signal review chatter out of the
   embedding index.
 - PR diff extraction, review clustering, and a retrieval eval harness.
-- PR replay benchmark ([`scripts/pr_replay_benchmark.py`](scripts/pr_replay_benchmark.py))
-  that replays already-merged PRs, where the real diff is ground truth, and
-  scores an agent with and without retrieved history. It reports **no
-  statistically demonstrated effect**: the measured gap is smaller than the
-  judge's own disagreement between presentation orders. See
-  [`benchmarks/README.md`](benchmarks/README.md).
+- PR replay benchmark, which replayed already-merged PRs against their real
+  merged diff and scored an agent with and without retrieved history. It found
+  **no statistically demonstrated effect**: the measured gap was smaller than
+  the judge's own disagreement between presentation orders. Removed after this
+  release — see Unreleased. Its files exist in the `v0.3.2` tag.
 - Clone-traffic export (`track_growth.py --export`) writing `metrics/clone-traffic.json`,
   preserving history past GitHub's rolling 14-day traffic window and naming its
   own gaps rather than presenting the series as continuous.
