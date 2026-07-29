@@ -30,6 +30,45 @@ flowchart LR
 - Indexing starts in the background. Use `get_index_stats` before relying on a new index.
 - Reuse `set_active_repo` for an already indexed repository.
 
+## Tool surface
+
+```mermaid
+mindmap
+  root(("MCP tools"))
+    GitHub connection
+      get_github_connection_status
+      begin_github_authorization
+      complete_github_authorization
+      disconnect_github
+    Index lifecycle
+      ensure_repo_ready
+      set_active_repo
+      list_indexed_repos
+      get_index_stats
+      delete_repo_index
+    Historical search
+      semantic_search_reviews
+      find_similar_errors
+      get_team_review_patterns
+    Context for a task
+      review_code_with_history
+      generate_code_from_history
+      generate_tests
+      static_analysis
+      suggest_refactors
+      security_check
+    Agent instructions
+      get_repo_rules_material
+    Legacy admin
+      update_settings
+      get_usage_stats
+```
+
+Every history-oriented tool returns **retrieval material**, never a final
+decision, and none of them calls a chat-model provider. Never pass a token to a
+connection tool. `update_settings` is disabled in local mode and remains only for
+legacy hosted settings; `get_usage_stats` requires usage tracking to be enabled.
+
 ## Tool reference
 
 | Tool | When the IDE agent should call it | What it returns |
