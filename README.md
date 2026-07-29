@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.3.2-green)
+![Version](https://img.shields.io/badge/version-0.3.3-green)
 ![Downloads](https://img.shields.io/badge/downloads-8k%2B-blue)
 
 **This MCP retrieves evidence. Your IDE agent decides what it means.**
