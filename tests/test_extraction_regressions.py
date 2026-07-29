@@ -228,13 +228,13 @@ def test_flatten_pr_surfaces_every_truncated_nested_connection():
                 "isResolved": False,
                 "path": "src/service.py",
                 "line": 42,
-                "diffHunk": "@@ -1 +1 @@",
                 "comments": {
                     "nodes": [
                         {
                             "author": {"login": "reviewer"},
                             "body": "Please change this.",
                             "createdAt": "2024-05-03T12:00:00Z",
+                            "diffHunk": "@@ -1 +1 @@",
                         }
                     ],
                     "pageInfo": {"hasNextPage": True},

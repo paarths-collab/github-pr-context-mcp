@@ -43,10 +43,9 @@ def test_flatten_pr_bot_detection():
                     "isResolved": True,
                     "path": "package.json",
                     "line": 10,
-                    "diffHunk": "@@ -10,1 +10,1 @@",
                     "comments": {
                         "nodes": [
-                            {"author": {"login": "github-actions-bot"}, "body": "LGTM", "createdAt": "2024-05-01T10:30:00Z"}
+                            {"author": {"login": "github-actions-bot"}, "body": "LGTM", "createdAt": "2024-05-01T10:30:00Z", "diffHunk": "@@ -10,1 +10,1 @@"}
                         ]
                     }
                 }

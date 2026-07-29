@@ -1,0 +1,124 @@
+--- libs/partners/anthropic/langchain_anthropic/chat_models.py (MODIFIED) ---
+@@ -475,6 +475,29 @@ def _format_data_content_block(block: dict) -> dict:
+     return formatted_block
+ 
+ 
++def _format_text_block(block: dict) -> dict:
++    """Narrow a text content block to fields supported by Anthropic's API.
++
++    Drops LangChain-internal fields (e.g. the ``id`` minted by
++    ``create_text_block``) that Anthropic rejects as extra inputs.
++    """
++    formatted_block = {
++        k: v
++        for k, v in block.items()
++        if k in ("type", "text", "cache_control", "citations")
++    }
++    # Clean up citations to remove null file_id fields
++    if formatted_block.get("citations"):
++        cleaned_citations = []
++        for citation in formatted_block["citations"]:
++            cleaned_citation = {
++                k: v for k, v in citation.items() if not (k == "file_id" and v is None)
++            }
++            cleaned_citations.append(cleaned_citation)
++        formatted_block["citations"] = cleaned_citations
++    return formatted_block
++
++
+ def _format_messages(
+     messages: Sequence[BaseMessage],
+ ) -> tuple[str | list[dict] | None, list[dict]]:
+
+@@ -490,7 +513,11 @@ def _format_messages(
+             if isinstance(message.content, list):
+                 system = [
+                     (
+-                        block
++                        (
++                            _format_text_block(block)
++                            if block.get("type") == "text"
++                            else block
++                        )
+                         if isinstance(block, dict)
+                         else {"type": "text", "text": block}
+                     )
+
+@@ -598,23 +625,7 @@ def _format_messages(
+                         # accepted.
+                         # https://github.com/anthropics/anthropic-sdk-python/issues/461
+                         if text.strip():
+-                            formatted_block = {
+-                                k: v
+-                                for k, v in block.items()
+-                                if k in ("type", "text", "cache_control", "citations")
+-                            }
+-                            # Clean up citations to remove null file_id fields
+-                            if formatted_block.get("citations"):
+-                                cleaned_citations = []
+-                                for citation in formatted_block["citations"]:
+-                                    cleaned_citation = {
+-                                        k: v
+-                                        for k, v in citation.items()
+-                                        if not (k == "file_id" and v is None)
+-                                    }
+-                                    cleaned_citations.append(cleaned_citation)
+-                                formatted_block["citations"] = cleaned_citations
+-                            content.append(formatted_block)
++                            content.append(_format_text_block(block))
+                     elif block["type"] == "thinking":
+                         content.append(
+                             {
+
+--- libs/partners/anthropic/tests/unit_tests/test_chat_models.py (MODIFIED) ---
+@@ -21,6 +21,7 @@
+     SystemMessage,
+     ToolMessage,
+ )
++from langchain_core.messages.content import create_text_block
+ from langchain_core.runnables import RunnableBinding
+ from langchain_core.tools import BaseTool, tool
+ from langchain_core.tracers.base import BaseTracer
+
+@@ -1480,6 +1481,41 @@ def test__format_messages_with_multiple_system() -> None:
+     assert expected_messages == actual_messages
+ 
+ 
++def test__format_messages_system_v1_content_blocks_drop_id() -> None:
++    """System text blocks from `create_text_block` must not leak the `id` field.
++
++    See https://github.com/langchain-ai/langchain/issues/39100
++    """
++    messages = [
++        SystemMessage(content_blocks=[create_text_block("You are helpful.")]),
++        HumanMessage("hi"),
++    ]
++    actual_system, actual_messages = _format_messages(messages)
++    assert actual_system == [{"type": "text", "text": "You are helpful."}]
++    assert actual_messages == [{"role": "user", "content": "hi"}]
++
++
++def test__format_messages_system_text_block_preserves_supported_fields() -> None:
++    """Sanitizing system text blocks keeps Anthropic-supported fields."""
++    messages = [
++        SystemMessage(
++            [
++                {
++                    "type": "text",
++                    "text": "foo",
++                    "id": "lc_abc123",
++                    "cache_control": {"type": "ephemeral"},
++                },
++            ],
++        ),
++        HumanMessage("hi"),
++    ]
++    actual_system, _ = _format_messages(messages)
++    assert actual_system == [
++        {"type": "text", "text": "foo", "cache_control": {"type": "ephemeral"}},
++    ]
++
++
+ def test_anthropic_api_key_is_secret_string() -> None:
+     """Test that the API key is stored as a SecretStr."""
+     chat_model = ChatAnthropic(  # type: ignore[call-arg, call-arg]
