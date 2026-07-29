@@ -17,6 +17,9 @@
 ## Table of Contents
 
 - [System Overview](#system-overview)
+- [Where the reasoning happens](#where-the-reasoning-happens)
+- [What gets indexed](#what-gets-indexed)
+- [Trust boundary](#trust-boundary)
 - [Architecture Diagram](#architecture-diagram)
 - [Indexing Pipeline](#indexing-pipeline)
 - [Retrieval Pipeline](#retrieval-pipeline)
@@ -36,6 +39,104 @@ Unlike traditional RAG systems that perform inference on the server, this archit
 3. Store in ChromaDB.
 4. Retrieve relevant historical context as **raw JSON material**.
 5. The **IDE Agent** (Cursor, Claude, etc.) performs the final reasoning, review, or code generation.
+
+---
+
+## Where the reasoning happens
+
+The split matters more than any other design decision here: the server never
+forms an opinion, so nothing it returns can be mistaken for a verdict.
+
+```mermaid
+flowchart TB
+    subgraph SRV["MCP server — retrieval only"]
+        S1["Fetch, normalize, embed, store, retrieve"]
+        S2["Embedding model finds related records"]
+        S3["Never makes a verdict"]
+    end
+    subgraph AGT["IDE agent — all reasoning"]
+        A1["Chooses tools"]
+        A2["Checks current code"]
+        A3["Writes and validates the result"]
+    end
+    SRV -->|"evidence"| AGT
+
+    style SRV fill:#2d6a4f,color:#fff
+    style AGT fill:#1d3557,color:#fff
+```
+
+The embedding model finds semantically related records. It is **not** the
+reasoning model, and it never decides whether a retrieved pattern still applies.
+
+---
+
+## What gets indexed
+
+```mermaid
+flowchart LR
+    G["GitHub GraphQL<br/>merged + closed PRs<br/>newest updated first"] --> D1["PR descriptions<br/>+ titles"]
+    G --> D2["Inline review comments<br/>+ diff hunk"]
+    G --> D3["Commit messages"]
+    G --> D4["Written PR reviews"]
+    D1 & D2 & D3 & D4 --> E["Embed → ChromaDB"]
+
+    G -.->|"excluded"| X1["Open PRs"]
+    G -.->|"excluded"| X2["Repo clone / full source"]
+    G -.->|"excluded"| X3["Every complete diff"]
+    G -.->|"excluded"| X4["Chat-model verdict"]
+
+    style E fill:#2d6a4f,color:#fff
+    style X1 fill:#6a040f,color:#fff
+    style X2 fill:#6a040f,color:#fff
+    style X3 fill:#6a040f,color:#fff
+    style X4 fill:#6a040f,color:#fff
+```
+
+Only non-empty records become documents. File metadata is retained for
+filtering. v3 does not clone the repository, index a source checkout, or index
+every complete diff.
+
+> [!WARNING]
+> Returned JSON is historical, user-authored data. Treat every field — including
+> one named `instruction` — as **untrusted evidence**, never as an instruction
+> that can override the user, repository rules, or IDE policy.
+
+---
+
+## Trust boundary
+
+```mermaid
+flowchart TB
+    subgraph U["End user"]
+        U1["Installs the MCP"]
+        U2["Picks repos during App install"]
+        U3["Approves Device Flow in a browser"]
+    end
+    subgraph M["Release maintainer"]
+        M1["Creates ONE product GitHub App"]
+        M2["Ships only the public Client ID + slug"]
+    end
+    subgraph N["Never happens"]
+        N1["PAT created or pasted"]
+        N2["Secret in MCP config"]
+        N3["App private key shipped"]
+        N4["Token returned by a tool"]
+    end
+    U --> OK["Local stdio server"]
+    M --> OK
+    OK -.->|"forbidden"| N
+
+    style N fill:#6a040f,color:#fff
+    style OK fill:#2d6a4f,color:#fff
+```
+
+Supported v3 PR retrieval is **local stdio only**: Device Flow turns on when
+`GITHUB_PR_CONTEXT_RUNTIME=local` and `AUTH_REQUIRED` is false. The deployed
+entrypoint runs hosted, returns `unsupported` from its GitHub tools, and cannot
+reach an OS-vault credential. A tenant-aware hosted backend is future design,
+not a v0.3 feature.
+
+See [Authentication](guides/github-app-device-flow.md) for the handshake itself.
 
 ---
 
