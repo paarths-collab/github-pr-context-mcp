@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
-![Version](https://img.shields.io/badge/version-0.3.1-green)
+![Version](https://img.shields.io/badge/version-0.3.2-green)
 ![Downloads](https://img.shields.io/badge/downloads-8k%2B-blue)
 
 **This MCP retrieves evidence. Your IDE agent decides what it means.**
@@ -185,7 +185,7 @@ The vault stores material per Client ID and credential profile. It **fails close
 <details>
 <summary>Release maintainer: configure the App once</summary>
 
-v0.3.1 bundles one public App identity in [`auth/product_github_app.py`](auth/product_github_app.py). Fork maintainers create their own public App, enable Device Flow, and bundle **only** its Client ID and slug — or use the `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_SLUG` overrides. GitHub may require a private key before installation; store it securely and never ship or configure it here.
+v0.3.2 bundles one public App identity in [`auth/product_github_app.py`](auth/product_github_app.py). Fork maintainers create their own public App, enable Device Flow, and bundle **only** its Client ID and slug — or use the `GITHUB_APP_CLIENT_ID` / `GITHUB_APP_SLUG` overrides. GitHub may require a private key before installation; store it securely and never ship or configure it here.
 
 </details>
 
