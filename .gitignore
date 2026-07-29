@@ -31,3 +31,6 @@ benchmarks/eval_summary_*.json
 
 # Re-fetchable PR corpus cache (1MB+); rebuild with --fetch
 benchmarks/replay_corpus_*.json
+
+# Verbatim duplicates of patches/ under neutral names; rebuild with --blind-claude
+benchmarks/claude_run/blind/

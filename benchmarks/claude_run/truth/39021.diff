@@ -1,0 +1,35 @@
+--- libs/partners/anthropic/langchain_anthropic/data/_profiles.py (MODIFIED) ---
+@@ -297,7 +297,7 @@
+         "video_outputs": False,
+         "reasoning_output": True,
+         "tool_calling": True,
+-        "structured_output": False,
++        "structured_output": True,
+         "attachment": True,
+         "temperature": False,
+         "image_url_inputs": True,
+
+--- libs/partners/anthropic/langchain_anthropic/data/profile_augmentations.toml (MODIFIED) ---
+@@ -42,6 +42,7 @@ reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+ reasoning_effort_default = "high"
+ 
+ [overrides."claude-opus-4-8"]
++structured_output = true
+ reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+ reasoning_effort_default = "high"
+ 
+
+--- libs/partners/anthropic/tests/unit_tests/test_chat_models.py (MODIFIED) ---
+@@ -2826,6 +2826,12 @@ def test_auto_append_betas_for_mcp_servers() -> None:
+     }
+ 
+ 
++def test_claude_opus_4_8_profile_supports_structured_output() -> None:
++    model = ChatAnthropic(model="claude-opus-4-8")
++    assert model.profile
++    assert model.profile["structured_output"] is True
++
++
+ def test_profile() -> None:
+     model = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+     assert model.profile

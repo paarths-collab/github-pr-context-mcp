@@ -1,0 +1,44 @@
+--- libs/partners/openai/langchain_openai/data/_profiles.py (MODIFIED) ---
+@@ -875,13 +875,6 @@
+         "image_tool_message": True,
+         "tool_choice": True,
+         "tool_call_streaming": True,
+-        "reasoning_effort_levels": [
+-            "none",
+-            "low",
+-            "medium",
+-            "high",
+-            "xhigh",
+-        ],
+     },
+     "gpt-5.3-codex": {
+         "name": "GPT-5.3 Codex",
+
+--- libs/partners/openai/langchain_openai/data/profile_augmentations.toml (MODIFIED) ---
+@@ -73,9 +73,6 @@ reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+ [overrides."gpt-5.2-codex"]
+ reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+ 
+-[overrides."gpt-5.3-chat-latest"]
+-reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+-
+ [overrides."gpt-5.3-codex"]
+ reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+ 
+
+--- libs/partners/openai/tests/unit_tests/chat_models/test_base.py (MODIFIED) ---
+@@ -167,6 +167,14 @@ def test_profile() -> None:
+     assert model.profile["max_input_tokens"] == 272_000
+ 
+ 
++def test_gpt_5_3_chat_latest_profile_has_no_reasoning_effort() -> None:
++    model = ChatOpenAI(model="gpt-5.3-chat-latest")
++
++    assert model.profile
++    assert model.profile["reasoning_output"] is False
++    assert "reasoning_effort_levels" not in model.profile
++
++
+ def test_function_message_dict_to_function_message() -> None:
+     content = json.dumps({"result": "Example #1"})
+     name = "test_function"

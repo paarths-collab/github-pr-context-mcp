@@ -1,0 +1,181 @@
+[
+  {
+    "pr_number": 39101,
+    "title": "fix(anthropic): strip unsupported fields from system message content blocks",
+    "retrieved_prs": [
+      38802,
+      32496,
+      38816,
+      34516,
+      38997,
+      39068,
+      38776,
+      39000
+    ],
+    "n_retrieved": 8,
+    "leaks": 0,
+    "context_chars": 9171,
+    "truth_chars": 5086,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 39021,
+    "title": "fix(anthropic): enable structured output for Claude Opus 4.8",
+    "retrieved_prs": [
+      32536,
+      38918,
+      38905,
+      38848,
+      38861,
+      38844,
+      38887,
+      38745
+    ],
+    "n_retrieved": 8,
+    "leaks": 0,
+    "context_chars": 6030,
+    "truth_chars": 1246,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 39020,
+    "title": "fix(core): use `tool_call_schema` cache for `BaseTool` token counting in `count_tokens_approximately`",
+    "retrieved_prs": [
+      38771,
+      38772,
+      38762,
+      38770,
+      38803,
+      38802
+    ],
+    "n_retrieved": 6,
+    "leaks": 0,
+    "context_chars": 11246,
+    "truth_chars": 4321,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 39009,
+    "title": "fix(openai): correct `gpt-5.3-chat-latest` profile",
+    "retrieved_prs": [
+      38774,
+      38803,
+      35085,
+      38887,
+      38825,
+      38980,
+      38983,
+      38799
+    ],
+    "n_retrieved": 8,
+    "leaks": 0,
+    "context_chars": 9913,
+    "truth_chars": 1518,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38845,
+    "title": "fix(langchain): only retry retryable exceptions in `ToolRetryMiddleware`",
+    "retrieved_prs": [
+      38756,
+      38824,
+      38844,
+      38778,
+      38767,
+      38795,
+      38819,
+      38816,
+      38811,
+      38773
+    ],
+    "n_retrieved": 10,
+    "leaks": 0,
+    "context_chars": 9223,
+    "truth_chars": 5535,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38786,
+    "title": "feat(langchain): add `meta` extra and support langchain-meta in init_chat_model",
+    "retrieved_prs": [
+      35085,
+      38755,
+      34126
+    ],
+    "n_retrieved": 3,
+    "leaks": 0,
+    "context_chars": 11342,
+    "truth_chars": 6424,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38781,
+    "title": "feat(langchain): `ToolErrorMiddleware`",
+    "retrieved_prs": [
+      38763,
+      32072,
+      38773,
+      32496,
+      38762,
+      38767,
+      38742
+    ],
+    "n_retrieved": 7,
+    "leaks": 0,
+    "context_chars": 6747,
+    "truth_chars": 12895,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38765,
+    "title": "fix(anthropic): preserve empty thinking field in signature_delta streaming",
+    "retrieved_prs": [
+      38625,
+      34516,
+      38760,
+      38501,
+      34846,
+      36867,
+      32452,
+      38758
+    ],
+    "n_retrieved": 8,
+    "leaks": 0,
+    "context_chars": 6795,
+    "truth_chars": 7883,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38751,
+    "title": "fix(fireworks): report cached prompt token usage",
+    "retrieved_prs": [
+      38743,
+      38742,
+      36867,
+      34516,
+      32496
+    ],
+    "n_retrieved": 5,
+    "leaks": 0,
+    "context_chars": 7619,
+    "truth_chars": 16553,
+    "truth_truncated": false
+  },
+  {
+    "pr_number": 38686,
+    "title": "fix(anthropic): add advisor_ prefix to builtin tool recognition",
+    "retrieved_prs": [
+      32072,
+      38672,
+      34126,
+      34516,
+      38609,
+      32452
+    ],
+    "n_retrieved": 6,
+    "leaks": 0,
+    "context_chars": 7808,
+    "truth_chars": 1685,
+    "truth_truncated": false
+  }
+]

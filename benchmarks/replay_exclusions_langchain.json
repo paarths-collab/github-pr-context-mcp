@@ -1,0 +1,52 @@
+{
+  "held_out": [
+    38686,
+    38751,
+    38765,
+    38781,
+    38786,
+    38845,
+    39009,
+    39020,
+    39021,
+    39101
+  ],
+  "answer_keys": {
+    "39101": [
+      [
+        39103,
+        "same issue ref #39100"
+      ]
+    ],
+    "39009": [
+      [
+        39015,
+        "title similarity 0.86 over shared files"
+      ],
+      [
+        39014,
+        "title similarity 0.86 over shared files"
+      ],
+      [
+        39013,
+        "title similarity 0.86 over shared files"
+      ]
+    ],
+    "38686": [
+      [
+        38660,
+        "same issue ref #38644"
+      ]
+    ],
+    "38751": [
+      [
+        38646,
+        "same issue ref #38648"
+      ],
+      [
+        38735,
+        "same issue ref #38648"
+      ]
+    ]
+  }
+}
