@@ -71,6 +71,62 @@ For an internal fork or temporary development build only, `GITHUB_APP_CLIENT_ID`
 
 GitHub permission and user permission are both required: a user cannot read a repository merely because the App was installed. GitHub documents this intersection for [GitHub App user access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app).
 
+### The handshake
+
+```mermaid
+sequenceDiagram
+    participant A as IDE agent
+    participant S as MCP server
+    participant B as Browser
+    participant V as OS vault
+
+    A->>S: get_github_connection_status
+    S-->>A: app_installation_url
+    A->>B: install App on chosen repos
+    A->>S: begin_github_authorization
+    S-->>A: verification_uri + user_code
+    A->>B: enter code, approve
+    loop while authorization_pending
+        A->>S: complete_github_authorization
+        S-->>A: wait retry_after_seconds
+    end
+    S->>V: store credential
+    S-->>A: connected
+    Note over A,S: only now start indexing
+```
+
+While `complete_github_authorization` returns `authorization_pending`, honour its
+`retry_after_seconds` before polling again. Any other status carries a message;
+start a new flow when it asks for one.
+
+### Connection states
+
+```mermaid
+stateDiagram-v2
+    [*] --> not_configured: maintainer shipped no Client ID
+    [*] --> disconnected
+    not_configured --> disconnected: fork configured
+    disconnected --> authorization_pending: begin_github_authorization
+    authorization_pending --> authorization_pending: poll, honor retry delay
+    authorization_pending --> connected: approved
+    connected --> reauthorization_required: expired or revoked
+    reauthorization_required --> authorization_pending: restart Device Flow
+    connected --> disconnected: disconnect_github
+    [*] --> unsupported: not local stdio
+```
+
+| State | Meaning and next action |
+| --- | --- |
+| `not_configured` | The release or fork maintainer supplied no public App Client ID. Do **not** substitute a PAT. |
+| `disconnected` | No local credential; start Device Flow. |
+| `authorization_pending` | Browser approval or the next permitted poll is outstanding; honour the retry delay. |
+| `connected` | Local indexing may use the vault credential. Tokens are never returned by a tool. |
+| `reauthorization_required` | Credential expired, revoked, or unable to refresh; complete Device Flow again. |
+| `unsupported` | Not running in the supported local-stdio configuration. Hosted v0.3 cannot retrieve personal PR history. |
+
+The vault stores material per Client ID and credential profile. It **fails
+closed** when the OS keyring is unavailable — there is no plaintext fallback.
+
 ## Refresh, privacy, and disconnect
 
 GitHub App Device Flow access tokens normally expire after eight hours. The local v0.3 server refreshes them automatically using the public Client ID and the refresh token held only in the OS vault; GitHub explicitly permits Device-Flow refresh without a client secret. Refresh tokens normally last six months. If a user revokes access or the refresh token expires, the MCP asks for the same browser approval again. See GitHub's [refresh-token documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens).
