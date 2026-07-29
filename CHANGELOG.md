@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-29
+
+### Fixed
+- **The distributed LICENSE was the wrong project's.** It carried the upstream
+  Model Context Protocol project's licensing-transition notice and the full
+  Apache-2.0 text, opening with a statement about *that* project rather than
+  this one, so GitHub reported this repository as Apache-2.0 while the README
+  said MIT. The correct MIT licence was added in `f78e00c` and overwritten by
+  the v0.3.0 release commit `6561a8e`; this restores that exact file. It is a
+  correction, not a relicence. Artifacts published as 0.3.0, 0.3.1 and 0.3.2
+  still contain the wrong file and cannot be changed.
+- The package declared no licence at all, which is why PyPI showed none. It now
+  ships PEP 639 metadata (`License-Expression: MIT`) and bundles the licence
+  file, alongside audience and Python-version classifiers.
+
+### Changed
+- Build requires setuptools 77 or newer, for PEP 639 `license` / `license-files`.
+  The older `license = {text = ...}` table form is deprecated and slated for
+  removal.
+- The README is a landing page rather than the whole manual: 417 words and two
+  diagrams, down from 853 words and thirteen. The detail moved to the page that
+  already owned each subject — retrieval/reasoning split, what gets indexed and
+  the trust boundary to `docs/architecture.md`; the Device Flow handshake and
+  connection state machine to `docs/guides/github-app-device-flow.md`; job
+  states, page caps, webhook indexing, storage modes and limits to
+  `docs/pipeline.md`; the tool surface to `docs/tools_strategy.md`.
+
 ### Removed
 - The `benchmarks/` directory and the PR replay harness that produced it. The
   benchmark reported no statistically demonstrated effect on ten tasks, which is

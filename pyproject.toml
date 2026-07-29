@@ -1,6 +1,6 @@
 [project]
 name = "github-pr-context-mcp"
-version = "0.3.2"
+version = "0.3.3"
 description = "Hardened Pure Context Retrieval Engine for GitHub PR History"
 readme = "README.md"
 requires-python = ">=3.10"
