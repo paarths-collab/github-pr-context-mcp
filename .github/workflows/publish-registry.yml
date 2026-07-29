@@ -1,0 +1,56 @@
+name: Publish to MCP Registry
+
+# The registry sat on 0.2.9 while PyPI moved to 0.3.1, because publishing was a
+# manual step that needed an interactive `mcp-publisher login github` on someone's
+# laptop. OIDC removes the human from the loop: the workflow proves it is running
+# in the paarths-collab repo, which is what the io.github.paarths-collab/*
+# namespace requires.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ref to publish server.json from'
+        required: false
+        default: 'main'
+
+jobs:
+  publish:
+    name: Publish server.json
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC; this is what authenticates to the registry
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher --version
+
+      # Fail before touching the registry rather than half-way through a publish.
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Check version matches pyproject
+        run: |
+          server_version=$(python -c "import json;print(json.load(open('server.json'))['version'])")
+          pkg_version=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "server.json=$server_version pyproject=$pkg_version"
+          if [ "$server_version" != "$pkg_version" ]; then
+            echo "::error::server.json ($server_version) and pyproject.toml ($pkg_version) disagree"
+            exit 1
+          fi
+
+      - name: Authenticate
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
