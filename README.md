@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-green)
 ![Version](https://img.shields.io/badge/version-0.3.3-green)
-![Downloads](https://img.shields.io/badge/downloads-8k%2B-blue)
+[![Downloads](https://static.pepy.tech/personalized-badge/github-pr-context-mcp?period=total&units=international_system&left_color=grey&right_color=blue&left_text=downloads)](https://pepy.tech/project/github-pr-context-mcp)
 
 **This MCP retrieves evidence. Your IDE agent decides what it means.**
 
