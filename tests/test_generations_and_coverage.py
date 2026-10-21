@@ -274,8 +274,11 @@ def test_legacy_without_truncation_marker_does_not_claim_older_history(env):
     _seed_legacy(repo, truncated=False)
     coverage = vs.compute_coverage(repo)
     assert coverage["history_complete"] is None
-    assert coverage["older_history_remaining"] is False
+    # Unknown completeness counts as "older history may remain" (changed from
+    # False: an unknown state must never read as "nothing left to fetch").
+    assert coverage["older_history_remaining"] is True
     assert "bounded history window, not full repository history" in coverage["summary"]
+    assert "history completeness is unknown" in coverage["summary"]
 
 
 # ── coverage ──────────────────────────────────────────────────────────────────
@@ -331,7 +334,7 @@ def test_coverage_marks_refresh_and_is_independent_of_job_success(env):
     repo = "acme/coverage-refresh"
     vs.index_prs(repo, [_pr(1, ["base doc"])])
     assert vs.compute_coverage(repo)["selection"] == "closed-created-window"
-    vs.index_prs(repo, [_pr(2, ["refresh doc"])])  # inferred refresh over an existing generation
+    vs.index_prs(repo, [_pr(2, ["refresh doc"])], is_refresh=True)
     vs.record_job_outcome(repo, status="failed", error_kind="rate_limited")
     cov = vs.compute_coverage(repo)
     assert cov["selection"] == "closed-created-window+refresh"
@@ -582,3 +585,182 @@ def test_generation_names_fit_chroma_limit_for_long_repo_names(env):
     assert len(vs._generation_name(repo, 999999)) <= 63
     vs.index_prs(repo, [_pr(1, ["body text"])])
     assert vs.get_active_generation(repo) == 1
+
+
+# ── review fixes: coverage unknowns, legacy ledgers, reconcile, is_refresh ────
+
+def test_unknown_history_completeness_counts_as_older_history_remaining(env):
+    repo = "acme/unknown-history"
+    vs.index_prs(repo, [_pr(1, ["doc one"])])
+    cov = vs.compute_coverage(repo)
+    assert cov["history_complete"] is None
+    assert cov["older_history_remaining"] is True
+    assert "history completeness is unknown" in cov["summary"]
+    vs.set_backfill_state(repo, history_complete=True)
+    cov = vs.compute_coverage(repo)
+    assert cov["older_history_remaining"] is False
+    assert "history completeness is unknown" not in cov["summary"]
+
+
+def test_legacy_ledger_without_created_dates_reports_null_window(env):
+    repo = "acme/legacy-nodates"
+    col = vs._persistent_client.get_or_create_collection(
+        name=vs._collection_name(repo), metadata=vs._collection_metadata(repo)
+    )
+    col.upsert(
+        ids=["a", "b"],
+        documents=["doc a", "doc b"],
+        embeddings=[_vector("doc a"), _vector("doc b")],
+        metadatas=[
+            {"type": "review_comment", "pr_number": 3, "pr_created_at": "2022-05-01T00:00:00Z"},
+            {"type": "review_comment", "pr_number": 4},  # no pr_created_at
+        ],
+    )
+    cov = vs.compute_coverage(repo)  # derived straight from metadata
+    assert cov["pull_requests_indexed"] == 2
+    assert cov["oldest_pr_created_at"] is None and cov["newest_pr_created_at"] is None
+    # After the first new write the ledger carries rows derived from legacy docs:
+    vs.index_prs(repo, [_pr(5, ["new doc"], created="2024-01-01T00:00:00Z")])
+    cov = vs.compute_coverage(repo)
+    assert cov["pull_requests_indexed"] == 3
+    assert cov["oldest_pr_created_at"] is None and cov["newest_pr_created_at"] is None
+    assert "created " not in cov["summary"]
+
+
+def test_nested_incomplete_units_count_distinct_threads_not_parts(env):
+    repo = "acme/nested-distinct"
+    col = vs._persistent_client.get_or_create_collection(
+        name=vs._collection_name(repo), metadata=vs._collection_metadata(repo)
+    )
+    base = {"type": "review_thread", "pr_number": 9, "pr_created_at": "2023-01-01T00:00:00Z",
+            "thread_incomplete": True}
+    metas = [
+        {**base, "thread_evidence_id": "T1:aaa", "evidence_id": "T1:p0", "part_index": 0, "part_count": 3},
+        {**base, "thread_evidence_id": "T1:aaa", "evidence_id": "T1:p1", "part_index": 1, "part_count": 3},
+        {**base, "thread_evidence_id": "T1:aaa", "evidence_id": "T1:p2", "part_index": 2, "part_count": 3},
+        {**base, "thread_evidence_id": "", "evidence_id": "T2:bbb"},
+    ]
+    col.upsert(ids=[m["evidence_id"] for m in metas], documents=["x"] * 4,
+               embeddings=[_vector(str(i)) for i in range(4)], metadatas=metas)
+    assert vs.compute_coverage(repo)["nested_incomplete_units"] == 2
+
+
+def test_prs_with_truncated_review_threads_count_as_nested_incomplete(env):
+    repo = "acme/threads-truncated"
+    pr = _pr(1, ["only returned thread"])
+    pr["truncated_connections"] = ["reviewThreads"]
+    pr["nested_incomplete_threads"] = 0
+    vs.index_prs(repo, [pr])
+    assert vs.compute_coverage(repo)["nested_incomplete_units"] == 1
+    # Derived path (legacy docs whose metadata records the truncation) agrees.
+    legacy = "acme/threads-truncated-legacy"
+    col = vs._persistent_client.get_or_create_collection(
+        name=vs._collection_name(legacy), metadata=vs._collection_metadata(legacy)
+    )
+    col.upsert(ids=["l1"], documents=["x"], embeddings=[_vector("x")], metadatas=[{
+        "type": "review_thread", "pr_number": 2, "pr_created_at": "2023-01-01T00:00:00Z",
+        "truncated_connections": json.dumps(["reviewThreads"]),
+    }])
+    assert vs.compute_coverage(legacy)["nested_incomplete_units"] == 1
+
+
+def _pr_ids(number, documents, **extra):
+    """Like _pr but keeps each document's explicit ``id``."""
+    pr = _pr(number, [])
+    pr["documents"] = documents
+    pr.update(extra)
+    return pr
+
+
+def _thread_doc(key, digest, text, **extra):
+    return {"id": f"{key}:{digest}", "type": "review_thread", "text": text, **extra}
+
+
+def _ids_in(repo):
+    col = vs._get_collection(repo)
+    return set(col.get(include=[])["ids"])
+
+
+def test_reindex_replaces_prior_units_of_the_pr_wholesale(env):
+    repo = "acme/reconcile-wholesale"
+    vs.index_prs(repo, [_pr_ids(1, [
+        {"id": "desc", "type": "pr_description", "text": "old description"},
+        _thread_doc("T1", "v1", "thread one first version"),
+        _thread_doc("T2", "v1", "thread two"),
+        {"id": "N1:c", "type": "commit_message", "text": "old commit"},
+        {"id": "rev1:r", "type": "review_summary", "text": "old summary"},
+    ]), _pr_ids(2, [{"id": "other-pr", "type": "pr_description", "text": "untouched"}])])
+    vs.index_prs(repo, [_pr_ids(1, [
+        {"id": "desc2", "type": "pr_description", "text": "new description"},
+        _thread_doc("T1", "v2", "thread one edited version"),
+    ])])
+    # T1 has exactly one version; everything else of PR 1 not rebuilt is gone; PR 2 untouched.
+    assert _ids_in(repo) == {"desc2", "T1:v2", "other-pr"}
+
+
+def test_reindex_with_truncated_review_threads_keeps_unreturned_threads_only(env):
+    repo = "acme/reconcile-truncated"
+    vs.index_prs(repo, [_pr_ids(1, [
+        {"id": "desc", "type": "pr_description", "text": "description"},
+        _thread_doc("T1", "v1", "thread one first version"),
+        _thread_doc("T2", "v1", "thread two (not re-returned)"),
+        {"id": "N1:c", "type": "commit_message", "text": "commit"},
+    ])])
+    partial = _pr_ids(1, [
+        {"id": "desc", "type": "pr_description", "text": "description"},
+        _thread_doc("T1", "v2", "thread one edited version"),
+    ])
+    partial["truncated_connections"] = ["reviewThreads"]
+    vs.index_prs(repo, [partial])
+    # T2 kept (GitHub did not return it), T1's old version replaced, commit
+    # (connection complete) reconciled away.
+    assert _ids_in(repo) == {"desc", "T1:v2", "T2:v1"}
+
+
+def test_is_refresh_is_explicit_and_never_inferred(env):
+    repo = "acme/refresh-flag"
+    # Initial import written in several chunks must not read as a refresh.
+    vs.index_prs(repo, [_pr(1, ["chunk one"])])
+    vs.index_prs(repo, [_pr(2, ["chunk two"])])
+    vs.index_prs(repo, [_pr(3, ["chunk three"])], advance_watermark=True)
+    assert vs.compute_coverage(repo)["selection"] == "closed-created-window"
+    assert vs.get_index_registry(repo)["refresh_applied"] is False
+    vs.index_prs(repo, [_pr(4, ["real refresh"])], is_refresh=True)
+    assert vs.compute_coverage(repo)["selection"] == "closed-created-window+refresh"
+    # Explicit False/None never clears an already-applied refresh.
+    vs.index_prs(repo, [_pr(5, ["later chunk"])], is_refresh=False)
+    assert vs.compute_coverage(repo)["selection"] == "closed-created-window+refresh"
+
+
+def test_legacy_upgrade_is_not_labelled_refresh(env):
+    repo = "acme/legacy-upgrade-flag"
+    _seed_legacy(repo)
+    vs.index_prs(repo, [_pr(8, ["first write over a legacy index"])])
+    assert vs.compute_coverage(repo)["selection"] == "closed-created-window"
+
+
+def test_same_commit_in_two_prs_indexed_in_separate_writes_keeps_both_units(env, monkeypatch):
+    from storage import document_builder
+
+    monkeypatch.setattr(vs, "build_documents", document_builder.build_documents)
+
+    def pr(number):
+        return {
+            "number": number, "title": f"PR {number}", "body": "", "state": "MERGED",
+            "created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-02T00:00:00Z",
+            "url": f"https://github.com/o/r/pull/{number}", "github_node_id": f"PR_{number}",
+            "commits": [{"oid": "abc123", "message": "fix: shared commit across two PRs"}],
+        }
+
+    repo = "acme/shared-commit"
+    vs.index_prs(repo, [pr(1)])
+    vs.index_prs(repo, [pr(2)])
+    metas = vs._get_collection(repo).get(include=["metadatas"])["metadatas"]
+    assert sorted(m["pr_number"] for m in metas) == [1, 2]
+    assert {m["pr_url"] for m in metas} == {"https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}
+    # Ids are the same as when both PRs are built in one batch.
+    together = document_builder.build_documents([pr(1), pr(2)])[2]
+    assert _ids_in(repo) == set(together)
+    # Re-indexing PR 1 alone leaves PR 2's unit untouched.
+    vs.index_prs(repo, [pr(1)])
+    assert _ids_in(repo) == set(together)

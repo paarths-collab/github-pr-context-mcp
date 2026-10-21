@@ -522,7 +522,8 @@ class TestEvidenceUnits:
         assert c_meta["source_kind"] == "commit_message"
         assert c_meta["source_url"] == "https://github.com/o/r/commit/deadbeef"
         assert c_meta["author"] == "alice"
-        assert c_meta["evidence_id"].startswith("deadbeef:")
+        # Commit oids repeat across PRs, so the key is PR-scoped (PR node id + oid).
+        assert c_meta["evidence_id"].startswith("PR_node9:commit:deadbeef:")
         (d_doc, d_meta), = _by_type(metadatas, docs, "pr_description")
         assert d_meta["source_kind"] == "pr_description"
         assert d_meta["source_url"] == "https://github.com/o/r/pull/9"
@@ -671,3 +672,60 @@ class TestMetadataSafety:
         _, metadatas, _ = build_documents([self._everything_pr()])
         for meta in metadatas:
             assert required <= set(meta), required - set(meta)
+
+
+# ── PR-scoped, batch-independent evidence ids ─────────────────────────────────
+
+class TestPrScopedEvidenceIds:
+
+    @staticmethod
+    def _pr_with_commit(number, node_id=None, oid="sharedoid", message="fix: shared commit message"):
+        pr = _minimal_pr(
+            number=number, url=f"https://github.com/o/r/pull/{number}", state="MERGED", body="",
+            commits=[{"oid": oid, "message": message}],
+        )
+        if node_id:
+            pr["github_node_id"] = node_id
+        return pr
+
+    def test_same_commit_in_two_prs_gets_distinct_ids_and_own_pr_number(self):
+        a, b = self._pr_with_commit(1, "PR_a"), self._pr_with_commit(2, "PR_b")
+        _, metas, ids = build_documents([a, b])
+        assert len(ids) == len(set(ids)) == 2
+        assert {m["evidence_id"]: m["pr_number"] for m in metas} == dict(
+            zip(ids, [1, 2])
+        )
+
+    def test_ids_identical_whether_built_together_separately_or_reordered(self):
+        a, b = self._pr_with_commit(1, "PR_a"), self._pr_with_commit(2)  # b has no node id
+        together = build_documents([a, b])[2]
+        separate = build_documents([a])[2] + build_documents([b])[2]
+        reordered = build_documents([b, a])[2]
+        assert together == separate
+        assert sorted(together) == sorted(reordered)
+        assert any(i.startswith("pr2:commit:sharedoid:") for i in together)
+
+    def test_identical_text_across_prs_never_depends_on_batch_order(self):
+        # Two PRs whose descriptions/commits are word-for-word equal.
+        prs = [
+            _minimal_pr(number=n, body="Identical description text for both pull requests.",
+                        commits=[{"oid": "same", "message": "chore: identical"}])
+            for n in (3, 4)
+        ]
+        forward = dict(zip(build_documents(prs)[2], [m["pr_number"] for m in build_documents(prs)[1]]))
+        backward = dict(zip(build_documents(prs[::-1])[2], [m["pr_number"] for m in build_documents(prs[::-1])[1]]))
+        assert forward == backward
+        assert len(forward) == 4
+
+    def test_duplicate_within_one_pr_is_still_deduplicated(self):
+        pr = _minimal_pr(number=5, body="", commits=[
+            {"oid": "dup", "message": "chore: same"}, {"oid": "dup", "message": "chore: same"},
+        ])
+        _, _, ids = build_documents([pr])
+        assert len(ids) == 2 and len(set(ids)) == 2
+
+    def test_same_pr_twice_in_a_batch_keeps_the_later_record(self):
+        old = self._pr_with_commit(7, "PR_x", message="fix: old message")
+        new = self._pr_with_commit(7, "PR_x", message="fix: new message")
+        docs, metas, ids = build_documents([old, new])
+        assert len(ids) == 1 and "new message" in docs[0]

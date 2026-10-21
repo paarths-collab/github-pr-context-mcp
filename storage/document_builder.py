@@ -265,6 +265,14 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
     docs: list[str] = []
     metadatas: list[dict] = []
     ids: list[str] = []
+    # Evidence ids must not depend on batch composition or order: the same PR
+    # built alone, or together with others, yields identical ids.  Keys are
+    # PR-scoped where the source id is not globally unique (commit oids repeat
+    # across PRs), and the only de-duplication is WITHIN one PR record
+    # (``seen_ids`` is reset per PR).  If a batch carries the same PR number
+    # twice, the later record wins (it is the fresher fetch).
+    latest_by_number = {pr["number"]: index for index, pr in enumerate(prs)}
+    prs = [pr for index, pr in enumerate(prs) if latest_by_number[pr["number"]] == index]
     seen_ids: set[str] = set()
 
     def emit(pr_base: dict, pr: dict, kind: str, source_kind: str, key: str,
@@ -295,12 +303,15 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "thread_evidence_id": thread_evidence_id,
                 "part_index": index,
                 "part_count": count,
+                "source_key": key,
             }
             metadatas.append(_clean_metadata(meta))
             ids.append(evidence_id)
 
     for pr in prs:
+        seen_ids.clear()
         pr_num = pr["number"]
+        pr_scope = _s(pr.get("github_node_id")) or f"pr{pr_num}"
         pr_url = _s(pr.get("url"))
         pr_title = _s(pr.get("title"))
         touches_ci = bool(pr.get("touches_ci", False))
@@ -406,7 +417,7 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 or _s(commit.get("created_at"))
             )
             emit(pr_base, pr, "commit_message", "commit_message",
-                 oid or f"pr-{pr_num}-commit-{i}", message, {
+                 f"{pr_scope}:commit:{oid or f'pr-{pr_num}-commit-{i}'}", message, {
                      **blank_thread_fields,
                      "source_url": commit_url,
                      "author": login,
