@@ -23,6 +23,10 @@ retrieval tools can import this file cheaply and tests can stub storage.
   ``coverage["older_history_remaining"]``);
 * ``ready_partial`` - a generation is published but a requested selection is
   unfinished (capped refresh continuation, or a backfill that stopped early);
+  an "import all history" run (``backfill_all``) that hit its ``max_pages`` cap
+  is ``ready_partial`` with a "call again with backfill_all=true" action and
+  (while it runs, ``index_job`` carries ``pages_done`` / ``prs_indexed`` /
+  ``history_complete``);
 * ``stale`` - a generation is published but the last refresh/backfill failed
   (the previous generation keeps serving; a failed refresh stays visible until
   a refresh succeeds, even if a backfill succeeded afterwards) or the index was
@@ -54,6 +58,10 @@ ERROR_KINDS = (
 )
 STALE_AFTER_DAYS = 30
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
+BACKFILL_ALL_CONTINUE_ACTION = (
+    "Page cap reached: call ensure_repo_ready again with backfill_all=true to "
+    "continue importing older history from the saved cursor."
+)
 
 # ── Process-local job map ─────────────────────────────────────────────────────
 
@@ -245,7 +253,7 @@ _PUBLIC_JOB_KEYS = (
     "status", "kind", "repo", "namespace", "storage", "refresh", "backfill",
     "started_at", "finished_at", "documents_indexed", "error", "error_kind",
     "action", "message", "history_complete", "older_history_remaining",
-    "pages",
+    "pages", "backfill_all", "max_pages", "pages_done", "prs_indexed",
 )
 
 
@@ -350,10 +358,12 @@ def describe_index_state(repo: str, namespace: str | None = None, storage="perma
             state = "ready_partial"
             if registry.get("refresh_cursor"):
                 action = "Run ensure_repo_ready with refresh=true to finish the capped refresh."
+            elif (last_job or {}).get("backfill_all") and (last_job or {}).get("action"):
+                action = last_job["action"]  # an import-all run stopped at its page cap
             else:
                 action = (
                     "Run ensure_repo_ready with backfill=true to continue importing "
-                    "older history."
+                    "older history (or backfill_all=true to import everything)."
                 )
         else:
             state = "ready_selected_scope"
