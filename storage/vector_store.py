@@ -302,47 +302,77 @@ def list_all_repos(namespace: str | None = None) -> list[dict]:
 
 # ── Indexing ──────────────────────────────────────────────────────────────────
 
-def _complete_document_types(pr: dict) -> set[str]:
-    """Identify document groups safe to reconcile after a partial GitHub response."""
+_THREAD_TYPES = {"review_thread", "review_comment"}  # review_comment = legacy per-comment units
+_THREAD_TRUNCATIONS = {"reviewThreads", "reviewThreads.comments"}
+
+
+def _truncated_set(pr: dict) -> set[str]:
     truncated = pr.get("truncated_connections")
-    truncated_set = set(truncated) if isinstance(truncated, list) else set()
-    complete = {"pr_description"}
-    if not {"reviewThreads", "reviewThreads.comments"} & truncated_set:
-        complete.add("review_comment")  # legacy per-comment units
-        complete.add("review_thread")
-    if "commits" not in truncated_set:
-        complete.add("commit_message")
-    if "reviews" not in truncated_set:
-        complete.add("review_summary")
-    return complete
+    return {str(v) for v in truncated} if isinstance(truncated, list) else set()
+
+
+def _unit_source_key(unit_id: str, metadata: dict | None) -> str:
+    """Return the source key of a unit (its id minus the trailing content digest)."""
+    key = (metadata or {}).get("source_key")
+    if isinstance(key, str) and key:
+        return key
+    return unit_id.rsplit(":", 1)[0] if ":" in unit_id else unit_id
 
 
 def _stale_document_ids(collection, prs: list[dict], ids: list[str], metadatas: list[dict]) -> list[str]:
-    """Find documents removed from complete portions of refreshed PR records."""
-    current_ids: dict[tuple[int, str], set[str]] = {}
-    for document_id, metadata in zip(ids, metadatas):
+    """Find previous units of a re-indexed PR that the new build supersedes.
+
+    Reconciliation rule (per PR present in the new batch): REPLACE the PR's
+    previous units wholesale - every previous unit whose id is not in the new
+    build is deleted (descriptions, review threads, review summaries, commits,
+    legacy units), so an edited thread never lingers as a second version.
+    The one exception protects against partial GitHub responses: for a group
+    whose connection is flagged truncated on the new PR record (``reviewThreads``
+    / ``reviewThreads.comments`` for threads, ``reviews``, ``commits``), old
+    units whose source was NOT re-returned are kept (GitHub may simply not have
+    sent them), while any old version of a source that WAS re-returned is
+    still deleted because the new fetch supersedes it.
+    """
+    current_ids: set[str] = set(ids)
+    new_keys: dict[tuple[int, str], set[str]] = {}
+    for unit_id, metadata in zip(ids, metadatas):
         pr_number = metadata.get("pr_number")
         doc_type = metadata.get("type")
         if isinstance(pr_number, int) and isinstance(doc_type, str):
-            current_ids.setdefault((pr_number, doc_type), set()).add(document_id)
+            new_keys.setdefault((pr_number, doc_type), set()).add(_unit_source_key(unit_id, metadata))
 
     stale: list[str] = []
     for pr in prs:
         pr_number = pr.get("number")
         if not isinstance(pr_number, int):
             continue
-        complete_types = _complete_document_types(pr)
+        truncated = _truncated_set(pr)
+        protected = set()
+        if truncated & _THREAD_TRUNCATIONS:
+            protected |= _THREAD_TYPES
+        if "commits" in truncated:
+            protected.add("commit_message")
+        if "reviews" in truncated:
+            protected.add("review_summary")
         existing = collection.get(where={"pr_number": pr_number}, include=["metadatas"])
         for existing_id, metadata in zip(
             existing.get("ids") or [], existing.get("metadatas") or []
         ):
+            if existing_id in current_ids:
+                continue
             doc_type = metadata.get("type") if isinstance(metadata, dict) else None
-            if (
-                isinstance(doc_type, str)
-                and doc_type in complete_types
-                and existing_id not in current_ids.get((pr_number, doc_type), set())
-            ):
-                stale.append(existing_id)
+            if not isinstance(doc_type, str):
+                continue
+            if doc_type in protected:
+                same_group = new_keys.get((pr_number, doc_type), set())
+                if doc_type in _THREAD_TYPES:
+                    same_group = same_group | new_keys.get(
+                        (pr_number, "review_thread" if doc_type == "review_comment" else "review_comment"),
+                        set(),
+                    )
+                if _unit_source_key(existing_id, metadata) not in same_group:
+                    continue  # partial response: keep what was not re-returned
+            stale.append(existing_id)
     return stale
 
 
@@ -351,18 +381,40 @@ def _pr_ledger_row(pr: dict) -> dict | None:
     if not isinstance(number, int) or isinstance(number, bool):
         return None
     nested = pr.get("nested_incomplete_threads")
+    nested = nested if isinstance(nested, int) and not isinstance(nested, bool) else 0
+    if "reviewThreads" in _truncated_set(pr):
+        nested = max(nested, 1)  # unfetched threads exist: the PR is at least partially covered
     return {
         "pr_number": number,
         "created_at": pr.get("created_at") if isinstance(pr.get("created_at"), str) else "",
         "updated_at": pr.get("updated_at") if isinstance(pr.get("updated_at"), str) else "",
         "state": pr.get("state") if isinstance(pr.get("state"), str) else "",
-        "nested_incomplete_threads": nested if isinstance(nested, int) else 0,
+        "nested_incomplete_threads": nested,
     }
 
 
+def _meta_truncated_connections(meta: dict) -> list:
+    raw = meta.get("truncated_connections")
+    if isinstance(raw, str) and raw:
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    return raw if isinstance(raw, list) else []
+
+
 def _ledger_rows_from_metadata(metadatas) -> dict[int, dict]:
-    """Derive per-PR ledger rows from document metadata (legacy / ledger-less indexes)."""
+    """Derive per-PR ledger rows from document metadata (legacy / ledger-less indexes).
+
+    ``nested_incomplete_threads`` counts DISTINCT incomplete threads (a split
+    thread's parts count once) and is at least 1 for a PR whose reviewThreads
+    connection was truncated.  ``created_at`` stays "" when no unit carries
+    ``pr_created_at`` so callers never invent a date from a partial set.
+    """
     rows: dict[int, dict] = {}
+    incomplete: dict[int, set] = {}
+    anonymous: dict[int, int] = {}
+    threads_truncated: set[int] = set()
     for meta in metadatas:
         if not isinstance(meta, dict):
             continue
@@ -389,7 +441,18 @@ def _ledger_rows_from_metadata(metadatas) -> dict[int, dict]:
         if isinstance(state, str) and state and not row["state"]:
             row["state"] = state
         if meta.get("thread_incomplete") is True:
-            row["nested_incomplete_threads"] += 1
+            thread_key = meta.get("thread_evidence_id") or meta.get("evidence_id")
+            if isinstance(thread_key, str) and thread_key:
+                incomplete.setdefault(number, set()).add(thread_key)
+            else:
+                anonymous[number] = anonymous.get(number, 0) + 1
+        if "reviewThreads" in _meta_truncated_connections(meta):
+            threads_truncated.add(number)
+    for number, row in rows.items():
+        count = len(incomplete.get(number, ())) + anonymous.get(number, 0)
+        if number in threads_truncated:
+            count = max(count, 1)
+        row["nested_incomplete_threads"] = count
     return rows
 
 
@@ -459,8 +522,9 @@ def index_prs(
 
     Returns the number of evidence units built from ``prs``.  ``is_refresh``
     marks the generation as one produced by an incremental refresh (used for the
-    coverage ``selection``); by default it is inferred (a write that advances
-    the watermark on top of an existing generation is a refresh).
+    coverage ``selection``).  It is never inferred: None leaves the registry's
+    existing refresh flag untouched (so chunked initial imports and legacy
+    upgrades are not labelled "+refresh").
     """
     storage = "temporary" if temporary else "permanent"
     with _chroma_lock:
@@ -529,11 +593,12 @@ def index_prs(
                 if row is not None:
                     ledger_upserts.append(row)  # later rows override derived ones
 
-            refresh_flag = (
-                is_refresh
-                if is_refresh is not None
-                else bool(previous is not None and previous.collection.count() > 0 and advance_watermark)
-            )
+            # Explicit ``is_refresh`` is the source of truth.  When it is None the
+            # generation is NOT labelled a refresh by inference (a chunked initial
+            # import or a legacy upgrade is indistinguishable from a refresh by
+            # shape); the registry's existing flag - set by complete_refresh() or
+            # an earlier is_refresh=True publish - is simply left unchanged.
+            refresh_flag = bool(is_refresh)
 
             # A delete during staging bumps the epoch; never publish over it.
             _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
@@ -762,6 +827,17 @@ def compute_coverage(
             summary_row = registry.ledger_summary(
                 repo_key, namespace=namespace, storage=label, generation=-1
             )
+        if active is not None and summary_row["count"] > 0 and any(
+            not r.get("created_at")
+            for r in registry.get_ledger(
+                repo_key, namespace=namespace, storage=label, generation=active.generation
+            )
+        ):
+            # Ledger rows derived from legacy documents may lack a creation date;
+            # never claim an oldest/newest created date from the partial set.
+            summary_row = {
+                **summary_row, "oldest_pr_created_at": None, "newest_pr_created_at": None
+            }
         if active is not None and summary_row["count"] == 0 and units > 0:
             derived = True
             rows: dict[int, dict] = {}
@@ -776,6 +852,8 @@ def compute_coverage(
             created = sorted(r["created_at"] for r in rows.values() if r["created_at"])
             updated = sorted(r["updated_at"] for r in rows.values() if r["updated_at"])
             numbers = list(rows)
+            if any(not r["created_at"] for r in rows.values()):
+                created = []  # a partial set must not claim an oldest/newest created date
             summary_row = {
                 "count": len(rows),
                 "pr_number_min": min(numbers) if numbers else None,
@@ -790,8 +868,9 @@ def compute_coverage(
             }
 
     history_complete = reg.get("history_complete")
+    # Unknown (None) completeness counts as "older history may remain".
     older_remaining = (
-        history_complete is False
+        history_complete is not True
         or bool(reg.get("backfill_cursor"))
         or (derived and pull_requests_truncated and history_complete is not True)
     )
@@ -827,6 +906,8 @@ def compute_coverage(
             summary += ", covering the full closed pull request history"
         else:
             summary += f", a {_BOUNDED_PHRASE}"
+            if history_complete is None:
+                summary += "; history completeness is unknown, so older history may remain"
         if derived:
             summary += " (derived from document metadata; this index has no coverage ledger)"
         summary += "."
