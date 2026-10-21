@@ -10,6 +10,10 @@ client, SIGKILLs it, starts a second process on the same HOME and checks what
 persisted. GitHub is stubbed inside the server process by
 ``tests/e2e/sitecustomize.py``; all data is invented. Prints a transcript with
 timings and writes a JSON transcript outside the repo. See docs/e2e-stdio-smoke.md.
+
+This script always runs (it needs no flag). The pytest wrapper of the same flow,
+tests/e2e/test_e2e_stdio.py, is opt-in: it is skipped by a bare ``pytest`` unless
+``E2E_RUN=1`` is set or the marker is selected with ``pytest -m e2e``.
 """
 
 from __future__ import annotations

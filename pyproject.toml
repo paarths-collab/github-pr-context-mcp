@@ -43,7 +43,7 @@ test = [
 # pytest's default `*_test.py` pattern, failing at import.
 testpaths = ["tests"]
 markers = [
-    "e2e: fresh wheel install + stdio MCP client session (needs uv; skip with E2E_SKIP=1 or -m 'not e2e')",
+    "e2e: fresh wheel install + stdio MCP client session (opt-in: run with E2E_RUN=1 or -m e2e; needs uv; E2E_SKIP=1 always skips)",
 ]
 
 [project.scripts]

@@ -477,7 +477,9 @@ def build_envelope(
     notes = list(warnings or [])
 
     if index_state == "stale":
-        notes.append(f"Index is stale: {stale_reason or 'it has not been refreshed recently'}. {action or ''}".strip())
+        # stale_reason may already end in sentence punctuation; avoid "..".
+        reason = (stale_reason or "it has not been refreshed recently").strip().rstrip(".").rstrip()
+        notes.append(f"Index is stale: {reason}. {action or ''}".strip())
     elif index_state == "ready_partial":
         notes.append("Index is partial: a requested refresh or history backfill is unfinished. Results cover only what is indexed.")
     elif index_state == "indexing" and kept:

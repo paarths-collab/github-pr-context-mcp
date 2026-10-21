@@ -279,3 +279,104 @@ def test_deleted_scope_rejects_a_late_empty_check(monkeypatch, tmp_path):
         vector_store.mark_repo_checked(repo, temporary=True, expected_epoch=epoch)
 
     assert vector_store._ephemeral_client.collections == {}
+
+
+def test_encoding_runs_outside_the_global_chroma_lock(monkeypatch, tmp_path):
+    """Slow model load/encode must not block stats/search-style reads or polls."""
+    import threading
+    import time
+
+    vector_store, _, _ = _load_vector_store(monkeypatch, tmp_path)
+    repo = "acme/widget"
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_encode(texts):
+        entered.set()
+        assert release.wait(timeout=30), "test never released the encoder"
+        return [[0.0] for _ in texts]
+
+    monkeypatch.setattr(vector_store, "encode_batch", blocking_encode)
+    outcome = {}
+
+    def writer():
+        try:
+            outcome["count"] = vector_store.index_prs(
+                repo, [_pr(1, [{"id": "pr-1-desc", "type": "pr_description", "text": "body"}])]
+            )
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the assertions below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(timeout=10), "encoder was never reached"
+
+        reads = {}
+
+        def reader():
+            started = time.monotonic()
+            reads["stats"] = vector_store.get_collection_stats(repo)
+            reads["epoch"] = vector_store.get_index_epoch(repo)
+            reads["registry"] = vector_store.get_index_registry(repo)
+            reads["elapsed"] = time.monotonic() - started
+
+        probe = threading.Thread(target=reader, daemon=True)
+        probe.start()
+        probe.join(timeout=5)
+        assert not probe.is_alive(), "reads blocked while the encoder was running"
+        assert reads["elapsed"] < 2
+        assert reads["stats"]["total_documents"] == 0  # nothing published yet
+        assert reads["stats"]["generation"] == 0
+        assert thread.is_alive(), "write should still be in progress"
+    finally:
+        release.set()
+        thread.join(timeout=30)
+
+    assert not thread.is_alive()
+    assert "error" not in outcome, outcome.get("error")
+    assert outcome["count"] == 1
+    stats = vector_store.get_collection_stats(repo)
+    assert stats["total_documents"] == 1
+    assert stats["generation"] == 1
+
+
+def test_delete_during_encoding_invalidates_the_write(monkeypatch, tmp_path):
+    """Epoch protection still holds when the lock is released while encoding."""
+    import threading
+
+    vector_store, _, _ = _load_vector_store(monkeypatch, tmp_path)
+    repo = "acme/widget"
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_encode(texts):
+        entered.set()
+        assert release.wait(timeout=30)
+        return [[0.0] for _ in texts]
+
+    monkeypatch.setattr(vector_store, "encode_batch", blocking_encode)
+    epoch = vector_store.get_index_epoch(repo)
+    outcome = {}
+
+    def writer():
+        try:
+            vector_store.index_prs(
+                repo,
+                [_pr(1, [{"id": "pr-1-desc", "type": "pr_description", "text": "body"}])],
+                expected_epoch=epoch,
+            )
+        except BaseException as exc:  # noqa: BLE001
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(timeout=10)
+        vector_store.delete_repo_index(repo)
+    finally:
+        release.set()
+        thread.join(timeout=30)
+
+    assert isinstance(outcome.get("error"), vector_store.IndexInvalidatedError)
+    assert vector_store.get_collection_stats(repo)["total_documents"] == 0
