@@ -27,10 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests" / "e2e"))
 
-DEFAULT_TRANSCRIPT = (
-    "/private/tmp/claude-501/-Users-paarthgala-Coding-portfolio-repairs-github-pr-context-mcp/"
-    "8e4b0925-c441-4caf-9a30-548b91805ca0/scratchpad/e2e-transcript.json"
-)
+DEFAULT_TRANSCRIPT = str(Path(tempfile.gettempdir()) / "e2e-transcript.json")
 
 
 def main() -> int:
