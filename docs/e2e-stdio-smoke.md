@@ -10,10 +10,12 @@ official `mcp` Python client, kill it, start a second process on the same HOME.*
 # Full fresh install + transcript (always does `uv build` -> new Python 3.11 venv -> wheel install)
 .venv/bin/python scripts/e2e_stdio_smoke.py [--transcript out.json] [--keep] [--encoder auto|real|fake]
 
-# The same flow as a pytest test (marker: e2e)
-HF_HUB_OFFLINE=1 .venv/bin/python -m pytest tests/e2e -q -s
+# The same flow as a pytest test (marker: e2e). It is OPT-IN: a bare `pytest` skips it
+# (it takes ~2.5 min and downloads torch on a cold cache).
+E2E_RUN=1 HF_HUB_OFFLINE=1 .venv/bin/python -m pytest tests/e2e -q -s
+HF_HUB_OFFLINE=1 .venv/bin/python -m pytest -m e2e -q -s     # selecting the marker needs no E2E_RUN
 
-# Skip it
+# Force-skip it (wins over E2E_RUN and -m e2e)
 E2E_SKIP=1 .venv/bin/python -m pytest -q          # or: -m "not e2e"
 ```
 

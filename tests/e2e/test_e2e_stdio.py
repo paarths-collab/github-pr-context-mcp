@@ -1,12 +1,14 @@
 """End-to-end test: fresh wheel install + a real MCP stdio client session + restart.
 
-Marked ``e2e``. It builds the wheel, installs it into a brand-new Python 3.11 venv
+Marked ``e2e`` and OPT-IN: a bare ``pytest`` skips it because it costs ~2.5 minutes
+and downloads torch on a cold cache. Run it with ``E2E_RUN=1 pytest tests/e2e`` or by
+selecting the marker (``pytest -m e2e``, which needs no ``E2E_RUN``). It builds the wheel, installs it into a brand-new Python 3.11 venv
 with uv, launches the INSTALLED ``github-pr-context-mcp`` console script and drives
 it with the official ``mcp`` client (see tests/e2e/e2e_harness.py for the flow and
 tests/e2e/sitecustomize.py for the in-process GitHub stub). Takes 1-2 minutes with a
 warm uv cache (first run downloads torch from PyPI).
 
-Skip it with ``E2E_SKIP=1`` or ``-m "not e2e"``; it also skips itself when uv, git,
+``E2E_SKIP=1`` always wins and skips it, as does ``-m "not e2e"``; it also skips itself when uv, git,
 Python 3.11 (via uv) or the ``mcp`` client are unavailable. Set ``E2E_VENV=/path``
 to reuse a venv that already has the wheel installed, ``E2E_ENCODER=fake|real`` to
 force the encoder, ``E2E_TRANSCRIPT=/path.json`` to keep the JSON transcript.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -30,9 +33,21 @@ import e2e_harness as h  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-def _skip_reason() -> str | None:
-    if os.environ.get("E2E_SKIP", "").strip().lower() in {"1", "true", "yes"}:
+def _truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _marker_selected(config) -> bool:
+    """True when ``-m`` explicitly selects e2e (``-m e2e``, not ``-m "not e2e"``)."""
+    expr = (getattr(config.option, "markexpr", "") or "").lower()
+    return re.search(r"(?<!not )(?<![\w])e2e(?![\w])", expr) is not None
+
+
+def _skip_reason(config=None) -> str | None:
+    if _truthy("E2E_SKIP"):
         return "E2E_SKIP is set"
+    if not _truthy("E2E_RUN") and not (config is not None and _marker_selected(config)):
+        return "e2e is opt-in: set E2E_RUN=1 or select it with `pytest -m e2e`"
     if shutil.which("uv") is None:
         return "uv is not installed"
     if shutil.which("git") is None:
@@ -47,8 +62,8 @@ def _skip_reason() -> str | None:
 
 
 @pytest.fixture(scope="module")
-def e2e_run(tmp_path_factory):
-    reason = _skip_reason()
+def e2e_run(tmp_path_factory, request):
+    reason = _skip_reason(request.config)
     if reason:
         pytest.skip(reason)
     workdir = tmp_path_factory.mktemp("pr-context-e2e")

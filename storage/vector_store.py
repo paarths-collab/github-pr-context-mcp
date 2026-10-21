@@ -527,18 +527,26 @@ def index_prs(
     upgrades are not labelled "+refresh").
     """
     storage = "temporary" if temporary else "permanent"
+
+    # Fail fast if the scope was already invalidated, before paying for encoding.
     with _chroma_lock:
+        _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
+
+    # Slow, Chroma-free work runs OUTSIDE the global lock: the first encode_batch
+    # can spend 30-40s loading the model and must not block searches, stats or
+    # progress polls.  An embedding failure raises here, before anything is staged.
+    docs, metadatas, ids = build_documents(prs)
+    ns = _normalize_namespace(namespace)
+    for meta in metadatas:
+        if ns:
+            meta["namespace"] = ns
+    embeddings = encode_batch(docs) if docs else []
+
+    with _chroma_lock:
+        # A delete while we were encoding bumps the epoch; do not stage over it.
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         registry = _registry()
         client = _client(temporary)
-
-        docs, metadatas, ids = build_documents(prs)
-        ns = _normalize_namespace(namespace)
-        for meta in metadatas:
-            if ns:
-                meta["namespace"] = ns
-        # Encode before touching storage: an embedding failure creates nothing.
-        embeddings = encode_batch(docs) if docs else []
 
         previous = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         reg_state = registry.get_registry(repo_key, namespace=namespace, storage=storage)

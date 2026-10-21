@@ -555,3 +555,25 @@ def test_envelope_with_the_real_index_status_module(monkeypatch):
     served = _search("zzalpha retries")
     assert served["index_state"] in {"ready_selected_scope", "stale"}
     assert served["results"] and served["generation"] == 1
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "The last refresh failed (authorization_revoked); generation 2 from the previous "
+        "successful job is still being served.",
+        "the previous generation is still served",
+    ],
+)
+def test_stale_warning_has_no_double_period(reason):
+    action = "The saved GitHub connection was rejected or has expired. Run disconnect_github."
+    envelope = retrieval.build_envelope(
+        repo=REPO, namespace=None, generation=2, index_state="stale",
+        retrieval_mode="semantic+lexical", coverage=None, units=[],
+        stale_reason=reason, action=action,
+    )
+    stale = [w for w in envelope["warnings"] if w.startswith("Index is stale")]
+    assert len(stale) == 1
+    assert ".." not in stale[0]
+    assert "still " in stale[0] and "The saved GitHub connection" in stale[0]
+    assert all(".." not in w for w in envelope["warnings"])
