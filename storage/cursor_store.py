@@ -32,12 +32,31 @@ class CursorStore:
                     PRIMARY KEY (repo_key, namespace, storage)
                 )
             ''')
+            # One row per PR actually imported. Refreshes re-fetch an overlap
+            # window, so counts and ranges are derived from distinct PRs here
+            # rather than accumulated, which would double count.
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS indexed_prs (
+                    repo_key TEXT NOT NULL,
+                    namespace TEXT NOT NULL,
+                    storage TEXT NOT NULL,
+                    pr_number INTEGER NOT NULL,
+                    updated_at TEXT,
+                    PRIMARY KEY (repo_key, namespace, storage, pr_number)
+                )
+            ''')
             existing_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info(index_cursors)")
             }
             for column, definition in {
                 "refresh_cursor": "TEXT",
                 "refresh_high_watermark": "TEXT",
+                # How far the last full import was allowed to reach, and whether
+                # it stopped short of the repository's oldest PR. NULL means
+                # "never recorded" (an index built before bounds existed).
+                "configured_pr_limit": "INTEGER",
+                "configured_pages": "INTEGER",
+                "history_truncated": "INTEGER",
             }.items():
                 if column not in existing_columns:
                     conn.execute(
@@ -226,6 +245,98 @@ class CursorStore:
                 (repo_key, ns, storage, last_pr_number, now_str, high_watermark),
             )
 
+    def record_indexed_prs(
+        self,
+        repo_key: str,
+        prs: list[dict],
+        *,
+        namespace: str | None = None,
+        storage: str = "permanent",
+        pr_limit: int | None = None,
+        pages: int | None = None,
+        history_truncated: bool | None = None,
+    ) -> None:
+        """Remember which PRs an import covered, and how far it was allowed to reach.
+
+        ``pr_limit``/``pages``/``history_truncated`` describe a full import; pass
+        ``None`` (an incremental refresh) to leave the earlier values untouched.
+        """
+        ns = self._namespace_key(namespace)
+        storage = self._validate_storage(storage)
+        rows = [
+            (repo_key, ns, storage, pr["number"], pr.get("updated_at") or None)
+            for pr in prs
+            if isinstance(pr.get("number"), int)
+        ]
+        import contextlib
+
+        with contextlib.closing(self._get_conn()) as conn:
+            conn.execute("BEGIN")
+            try:
+                conn.execute(
+                    """INSERT INTO index_cursors (repo_key, namespace, storage)
+                       VALUES (?, ?, ?) ON CONFLICT(repo_key, namespace, storage) DO NOTHING""",
+                    (repo_key, ns, storage),
+                )
+                conn.executemany(
+                    """INSERT INTO indexed_prs (repo_key, namespace, storage, pr_number, updated_at)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(repo_key, namespace, storage, pr_number)
+                       DO UPDATE SET updated_at = excluded.updated_at""",
+                    rows,
+                )
+                if history_truncated is not None:
+                    conn.execute(
+                        """UPDATE index_cursors
+                           SET configured_pr_limit = ?, configured_pages = ?, history_truncated = ?
+                           WHERE repo_key = ? AND namespace = ? AND storage = ?""",
+                        (pr_limit, pages, int(history_truncated), repo_key, ns, storage),
+                    )
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+
+    def get_bounds(
+        self,
+        repo_key: str,
+        namespace: str | None = None,
+        storage: str = "permanent",
+    ) -> dict | None:
+        """Summarize what the stored PR history covers; ``None`` if never recorded."""
+        ns = self._namespace_key(namespace)
+        storage = self._validate_storage(storage)
+        import contextlib
+
+        with contextlib.closing(self._get_conn()) as conn:
+            count, oldest_number, newest_number, oldest_at, newest_at = conn.execute(
+                """SELECT COUNT(*), MIN(pr_number), MAX(pr_number),
+                          MIN(updated_at), MAX(updated_at)
+                   FROM indexed_prs
+                   WHERE repo_key = ? AND namespace = ? AND storage = ?""",
+                (repo_key, ns, storage),
+            ).fetchone()
+            row = conn.execute(
+                """SELECT configured_pr_limit, configured_pages, history_truncated
+                   FROM index_cursors
+                   WHERE repo_key = ? AND namespace = ? AND storage = ?""",
+                (repo_key, ns, storage),
+            ).fetchone()
+        if count == 0:
+            return None
+        limit, pages, truncated = row if row else (None, None, None)
+        return {
+            "recorded": True,
+            "indexed_pr_count": count,
+            "oldest_pr_number": oldest_number,
+            "newest_pr_number": newest_number,
+            "oldest_pr_updated_at": oldest_at,
+            "newest_pr_updated_at": newest_at,
+            "configured_pr_limit": limit,
+            "configured_pages": pages,
+            "history_truncated": None if truncated is None else bool(truncated),
+        }
+
     def migrate_legacy_cursors(self, *, dry_run: bool = False) -> dict[str, int | bool]:
         """Copy pre-v3 cursor rows without treating local timestamps as GitHub watermarks."""
         report: dict[str, int | bool] = {
@@ -300,11 +411,12 @@ class CursorStore:
         import contextlib
 
         with contextlib.closing(self._get_conn()) as conn:
-            conn.execute(
-                """DELETE FROM index_cursors
-                   WHERE repo_key = ? AND namespace = ? AND storage = ?""",
-                (repo_key, ns, storage),
-            )
+            for table in ("index_cursors", "indexed_prs"):
+                conn.execute(
+                    f"""DELETE FROM {table}
+                        WHERE repo_key = ? AND namespace = ? AND storage = ?""",
+                    (repo_key, ns, storage),
+                )
 
 
 _DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".github-pr-mcp")

@@ -1,5 +1,9 @@
 # GraphQL query strings only — no HTTP, no transformation logic here.
 
+# Must match the ``first:`` argument of ``pullRequests`` below; the indexer uses
+# it to report the configured PR limit (pages * PRS_PER_PAGE).
+PRS_PER_PAGE = 30
+
 PR_QUERY = """
 query GetPRs($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -16,9 +20,10 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
       nodes {
         id
         number
+        url
         title
         body
-        author { login }
+        author { login __typename }
         createdAt
         updatedAt
         mergedAt
@@ -45,10 +50,12 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
               pageInfo { hasNextPage }
               nodes {
                 id
-                author { login }
+                url
+                author { login __typename }
                 body
                 createdAt
                 diffHunk
+                pullRequestReview { url }
               }
             }
           }
@@ -66,7 +73,8 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
           pageInfo { hasNextPage }
           nodes {
             id
-            author { login }
+            url
+            author { login __typename }
             state
             body
             submittedAt

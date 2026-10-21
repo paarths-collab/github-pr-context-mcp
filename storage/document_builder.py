@@ -3,6 +3,8 @@
 
 import json
 
+from fetcher.transform import author_type, _is_bot
+
 
 def is_high_quality_comment(body: str, is_bot: bool) -> bool:
     """Filter out low-signal PR comments to improve embedding quality."""
@@ -38,15 +40,20 @@ def _review_is_bot(review: dict) -> bool:
         return bool(review["is_bot"])
 
     author = review.get("author")
-    if not isinstance(author, str):
-        return False
+    return _is_bot(author) if isinstance(author, str) else False
 
-    normalized_author = author.lower()
-    return (
-        "[bot]" in normalized_author
-        or normalized_author.endswith("-bot")
-        or normalized_author in {"github-actions", "dependabot", "vercel"}
-    )
+
+def _pr_url(pr: dict, repo_key: str | None) -> str:
+    """Prefer the URL GitHub returned; derive the canonical one only as a fallback."""
+    url = pr.get("url")
+    if isinstance(url, str) and url:
+        return url
+    return f"https://github.com/{repo_key}/pull/{pr['number']}" if repo_key else ""
+
+
+def _links(pr_url: str, review_url: str = "", comment_url: str = "") -> dict:
+    """Evidence links stored as flat strings; '' means GitHub gave no such link."""
+    return {"pr_url": pr_url, "review_url": review_url, "comment_url": comment_url}
 
 
 def _extraction_metadata(pr: dict) -> dict:
@@ -72,10 +79,17 @@ def _extraction_note(pr: dict) -> str:
     )
 
 
-def build_documents(prs: list[dict]) -> tuple[list, list, list]:
+def build_documents(
+    prs: list[dict], repo_key: str | None = None
+) -> tuple[list, list, list]:
     """
     Convert a list of PR dicts into (documents, metadatas, ids)
     ready to be encoded and upserted into ChromaDB.
+
+    Every document carries ``author_type`` ("human" or "bot") and the evidence
+    links (``pr_url``, ``review_url``, ``comment_url``) that GitHub supplied.
+    ``repo_key`` lets the PR link be derived for records fetched before URLs
+    were requested.
     """
     docs, metadatas, ids = [], [], []
 
@@ -83,6 +97,8 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
         pr_num = pr["number"]
         extraction_metadata = _extraction_metadata(pr)
         extraction_note = _extraction_note(pr)
+        pr_url = _pr_url(pr, repo_key)
+        pr_author_is_bot = bool(pr.get("author_is_bot", False))
 
         # PR description
         if pr["body"].strip():
@@ -91,9 +107,11 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "type": "pr_description",
                 "pr_number": pr_num,
                 "author": pr["author"],
-                "author_is_bot": pr.get("author_is_bot", False),
+                "author_is_bot": pr_author_is_bot,
+                "author_type": author_type(pr_author_is_bot),
                 "touches_ci": pr.get("touches_ci", False),
                 "files": json.dumps([f["path"] for f in pr["files"]]),
+                **_links(pr_url),
                 **extraction_metadata,
             })
             ids.append(f"pr-{pr_num}-desc")
@@ -113,8 +131,10 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "pr_number": pr_num,
                 "file": comment["file"],
                 "author": comment["author"],
+                "author_type": author_type(bool(comment.get("is_bot", False))),
                 "resolved": comment["resolved"],
                 "touches_ci": pr.get("touches_ci", False),
+                **_links(pr_url, comment.get("review_url") or "", comment.get("url") or ""),
                 **extraction_metadata,
             })
             comment_id = comment.get("github_node_id") or str(i)
@@ -128,7 +148,11 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
             metadatas.append({
                 "type": "commit_message",
                 "pr_number": pr_num,
+                # Commit authors are not fetched, so a commit inherits its PR
+                # author's type (a dependabot PR's commits are bot commits).
+                "author_type": author_type(pr_author_is_bot),
                 "touches_ci": pr.get("touches_ci", False),
+                **_links(pr_url),
                 **extraction_metadata,
             })
             commit_id = commit.get("oid") or str(i)
@@ -152,7 +176,9 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "state": review["state"],
                 "author": review["author"],
                 "is_bot": _review_is_bot(review),
+                "author_type": author_type(_review_is_bot(review)),
                 "touches_ci": pr.get("touches_ci", False),
+                **_links(pr_url, review.get("url") or ""),
                 **extraction_metadata,
             })
             review_id = review.get("github_node_id") or str(i)

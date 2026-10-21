@@ -23,7 +23,10 @@ def _load_indexing_module(monkeypatch):
         "checkpoint_refresh",
         "complete_refresh",
         "delete_repo_index",
+        "describe_coverage",
         "get_collection_stats",
+        "get_index_bounds",
+        "history_complete",
         "get_index_epoch",
         "get_last_updated_at",
         "get_refresh_state",
@@ -50,6 +53,9 @@ def _load_indexing_module(monkeypatch):
         return []
 
     fetcher_module.fetch_prs = fetch_prs
+    fetcher_module.__path__ = []
+    fetcher_queries_module = types.ModuleType("fetcher.queries")
+    fetcher_queries_module.PRS_PER_PAGE = 30
 
     auth_module = types.ModuleType("auth")
     auth_module.GitHubAuthorizationError = type("GitHubAuthorizationError", (Exception,), {})
@@ -77,6 +83,7 @@ def _load_indexing_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fastmcp_module)
     monkeypatch.setitem(sys.modules, "storage", storage_module)
     monkeypatch.setitem(sys.modules, "fetcher", fetcher_module)
+    monkeypatch.setitem(sys.modules, "fetcher.queries", fetcher_queries_module)
     monkeypatch.setitem(sys.modules, "auth", auth_module)
     monkeypatch.setitem(sys.modules, "app", app_package)
     monkeypatch.setitem(sys.modules, "app.state", state_module)

@@ -34,12 +34,15 @@ def register_analysis_tools(mcp):
         only_ci: bool = False,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
         Search past review comments semantically.
         Use 'only_ci=True' to filter for PRs that touched CI/CD files (Workflows, Docker, etc).
-        Returns raw context snippets for the IDE agent to analyze.
+        Returns raw context snippets for the IDE agent to analyze. Each hit carries
+        'links' (pr, review, comment URLs where GitHub has them) and 'author_type'
+        ('human' or 'bot'); pass 'exclude_bots=True' to drop bot-authored hits.
         """
         if ctx is None:
             raise ValueError("Context is required")
@@ -59,6 +62,7 @@ def register_analysis_tools(mcp):
             n_results=n_results,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
             where=where,
         )
         
@@ -75,6 +79,7 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -97,6 +102,7 @@ def register_analysis_tools(mcp):
             n_results=10,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)
@@ -117,6 +123,7 @@ def register_analysis_tools(mcp):
         only_ci: bool = False,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -142,6 +149,7 @@ def register_analysis_tools(mcp):
             n_results=12,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
             where=where,
         )
         
@@ -164,6 +172,7 @@ def register_analysis_tools(mcp):
         only_ci: bool = False,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -189,6 +198,7 @@ def register_analysis_tools(mcp):
             n_results=25,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
             where=where,
         )
         
@@ -210,6 +220,7 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -229,7 +240,8 @@ def register_analysis_tools(mcp):
             _contextual_query("unit testing integration mock fixtures assert", code),
             n_results=12, 
             temporary=temporary, 
-            namespace=namespace
+            namespace=namespace,
+            exclude_bots=exclude_bots
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)
@@ -249,6 +261,7 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -268,7 +281,8 @@ def register_analysis_tools(mcp):
             _contextual_query("lint style nit readability clean code formatting", code),
             n_results=12, 
             temporary=temporary, 
-            namespace=namespace
+            namespace=namespace,
+            exclude_bots=exclude_bots
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)
@@ -288,6 +302,7 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -307,7 +322,8 @@ def register_analysis_tools(mcp):
             _contextual_query("refactor DRY modularity performance complexity abstraction", code),
             n_results=12, 
             temporary=temporary, 
-            namespace=namespace
+            namespace=namespace,
+            exclude_bots=exclude_bots
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)
@@ -327,6 +343,7 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -346,7 +363,8 @@ def register_analysis_tools(mcp):
             _contextual_query("security vulnerability injection sanitization auth encryption", code),
             n_results=15, 
             temporary=temporary, 
-            namespace=namespace
+            namespace=namespace,
+            exclude_bots=exclude_bots
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)

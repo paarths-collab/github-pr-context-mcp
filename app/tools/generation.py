@@ -25,6 +25,7 @@ def register_generation_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -47,6 +48,7 @@ def register_generation_tools(mcp):
             n_results=15,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
         )
         
         warning = await _get_stale_warning(repo_key, temporary, namespace)
@@ -70,6 +72,7 @@ def register_generation_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        exclude_bots: bool = False,
         ctx: Context | None = None,
     ) -> str:
         """
@@ -93,6 +96,7 @@ def register_generation_tools(mcp):
             n_results=35,
             temporary=temporary,
             namespace=namespace,
+            exclude_bots=exclude_bots,
         )
 
         warning = await _get_stale_warning(repo_key, temporary, namespace)

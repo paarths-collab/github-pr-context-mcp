@@ -138,6 +138,7 @@ def test_semantic_search_reviews_resolves_state_helpers(monkeypatch):
             "n_results": 15,
             "temporary": False,
             "namespace": "team-a",
+            "exclude_bots": False,
             "where": None,
         },
     )
@@ -215,6 +216,10 @@ def test_review_summary_without_inline_comments_has_own_bot_metadata():
         "state": "APPROVED",
         "author": "dependabot[bot]",
         "is_bot": True,
+        "author_type": "bot",
+        "pr_url": "",
+        "review_url": "",
+        "comment_url": "",
         "touches_ci": False,
         "source_truncated": False,
         "truncated_connections": "[]",

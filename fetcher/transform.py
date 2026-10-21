@@ -17,8 +17,17 @@ CI_PATTERNS = [
 ]
 
 
-def _is_bot(login: str) -> bool:
-    """Heuristic to detect if a login belongs to a bot."""
+def _is_bot(login: str, typename: str | None = None) -> bool:
+    """Decide whether a GitHub actor is a bot.
+
+    GitHub's GraphQL ``__typename`` is authoritative when present: bot accounts
+    are ``Bot`` and everything else (``User``, ``Organization``, ...) is human,
+    even if the login happens to end in ``-bot``. GraphQL logins also drop the
+    ``[bot]`` suffix that REST adds, which is why the type is requested. Without
+    a type (older payloads) fall back to the login heuristics.
+    """
+    if typename:
+        return typename == "Bot"
     if not login:
         return False
     normalized = login.lower()
@@ -27,6 +36,16 @@ def _is_bot(login: str) -> bool:
         or normalized.endswith("-bot")
         or normalized in {"github-actions", "dependabot", "vercel"}
     )
+
+
+def author_type(is_bot: bool) -> str:
+    """Return the public label for an author: ``bot`` or ``human``."""
+    return "bot" if is_bot else "human"
+
+
+def _url(value: object) -> str:
+    """Return an https link from the API, or '' so callers never emit a bad one."""
+    return value if isinstance(value, str) and value.startswith("https://") else ""
 
 
 def _text(value: object) -> str:
@@ -53,6 +72,11 @@ def _login(actor: object) -> str:
         if isinstance(login, str) and login:
             return login
     return "ghost"
+
+
+def _actor_is_bot(actor: object) -> bool:
+    typename = actor.get("__typename") if isinstance(actor, dict) else None
+    return _is_bot(_login(actor), typename if isinstance(typename, str) else None)
 
 
 def flatten_pr(raw_pr: dict) -> dict:
@@ -104,13 +128,20 @@ def flatten_pr(raw_pr: dict) -> dict:
             if len(diff_hunk) > MAX_DIFF_SIZE:
                 diff_hunk = diff_hunk[:MAX_DIFF_SIZE] + "\n... [diff truncated due to size] ..."
             author_login = _login(comment.get("author"))
+            comment_is_bot = _actor_is_bot(comment.get("author"))
+            parent_review = comment.get("pullRequestReview")
             review_comments.append({
                 "github_node_id": _text(comment.get("id")),
+                "url": _url(comment.get("url")),
+                "review_url": _url(
+                    parent_review.get("url") if isinstance(parent_review, dict) else None
+                ),
                 "file": _text(thread.get("path")),
                 "line": thread.get("line"),
                 "resolved": bool(thread.get("isResolved")),
                 "author": author_login,
-                "is_bot": _is_bot(author_login),
+                "is_bot": comment_is_bot,
+                "author_type": author_type(comment_is_bot),
                 "body": _text(comment.get("body")),
                 "created_at": _text(comment.get("createdAt")),
                 "diff_hunk": diff_hunk,
@@ -121,6 +152,7 @@ def flatten_pr(raw_pr: dict) -> dict:
         body = body[:MAX_BODY_SIZE] + "\n... [body truncated due to size] ..."
 
     author_login = _login(raw_pr.get("author"))
+    pr_author_is_bot = _actor_is_bot(raw_pr.get("author"))
     raw_commits = _connection_nodes(raw_pr.get("commits"), "commits", truncated_connections)
     commits = []
     for commit_node in raw_commits:
@@ -137,10 +169,13 @@ def flatten_pr(raw_pr: dict) -> dict:
         if not isinstance(review, dict):
             continue
         reviewer = _login(review.get("author"))
+        reviewer_is_bot = _actor_is_bot(review.get("author"))
         reviews.append({
             "github_node_id": _text(review.get("id")),
+            "url": _url(review.get("url")),
             "author": reviewer,
-            "is_bot": _is_bot(reviewer),
+            "is_bot": reviewer_is_bot,
+            "author_type": author_type(reviewer_is_bot),
             "state": _text(review.get("state")),
             "body": _text(review.get("body")),
             "submitted_at": _text(review.get("submittedAt")),
@@ -151,10 +186,12 @@ def flatten_pr(raw_pr: dict) -> dict:
     return {
         "github_node_id": _text(raw_pr.get("id")),
         "number": raw_pr["number"],
+        "url": _url(raw_pr.get("url")),
         "title": _text(raw_pr.get("title")),
         "body": body,
         "author": author_login,
-        "author_is_bot": _is_bot(author_login),
+        "author_is_bot": pr_author_is_bot,
+        "author_type": author_type(pr_author_is_bot),
         "touches_ci": touches_ci,
         "created_at": created_at,
         "updated_at": updated_at,

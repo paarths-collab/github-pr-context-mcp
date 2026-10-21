@@ -4,7 +4,17 @@ Uses an ephemeral ChromaDB collection so no disk state is left behind.
 """
 import pytest
 from storage.clustering import _assign_theme, _deduplicate, cluster_patterns
+from storage.encoder import encode
 from storage.vector_store import index_prs, delete_repo_index
+
+
+@pytest.fixture(scope="module")
+def embedding_model_available():
+    """These tests embed with the real model, which is downloaded on first use."""
+    try:
+        encode("warm up")
+    except OSError as exc:
+        pytest.skip(f"all-MiniLM-L6-v2 is not cached and cannot be downloaded: {exc}")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -180,6 +190,7 @@ class TestDeduplicate:
 
 # ── Integration tests: cluster_patterns ───────────────────────────────────────
 
+@pytest.mark.usefixtures("embedding_model_available")
 class TestClusterPatterns:
     def setup_method(self):
         _seed_index()

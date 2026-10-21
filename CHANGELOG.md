@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Index status states its real bounds.** `get_index_stats` now returns `bounds`
+  (PRs indexed, oldest/newest PR number, oldest/newest `updatedAt`, configured
+  PR limit and page count, `history_truncated`), `history_complete` and a
+  one-sentence `coverage`. The bounds are stored in the cursor database and
+  derived from the distinct PRs actually imported, so refresh overlap does not
+  inflate them. Indexes built before this release report their bounds as
+  unrecorded instead of guessing.
+- **Evidence links on every retrieval hit.** Each hit carries
+  `links.pr`, `links.review` and `links.comment` (null where GitHub has no such
+  object, e.g. a PR description has no comment) plus `author_type`
+  (`human` or `bot`). The GraphQL query now requests `url` and `__typename`.
+- **`exclude_bots`** on every retrieval tool drops bot-authored hits.
+- An end-to-end test drives the real stdio server with the official `mcp`
+  client against replayed GitHub fixtures, including restart persistence
+  (`tests/test_e2e_stdio.py`; see "Verified flow" in the README).
+
+### Changed
+- "Ready" no longer reads as "complete". The `ready` job message and the
+  "already indexed" reply now say the job finished, not that the whole history
+  was imported, and point at `coverage`.
+- Bot detection trusts GitHub's actor type (`Bot`) over the login text, so a
+  human whose login ends in `-bot` is no longer misclassified. Logins without a
+  type (older payloads) fall back to the previous name heuristics.
+- Inline comments by bots are still not indexed. Bot-authored PR descriptions
+  and review summaries are, and are labelled `bot`.
+- Commit messages inherit their PR author's type, because commit authors are not
+  fetched.
+
+### Fixed
+- Clustering tests skip, with a reason, when the embedding model cannot be
+  downloaded instead of erroring.
+
 ## [0.3.3] - 2026-07-29
 
 ### Fixed

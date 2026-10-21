@@ -29,6 +29,40 @@ sequenceDiagram
 
 `ensure_repo_ready` starts background indexing when needed. Call it with `refresh=true` to synchronise an existing index using the GitHub `updatedAt` watermark. Use `get_index_stats` to verify that documents are available before depending on a newly requested index; its `index_job` exposes queued/running/ready/failed state and any `truncated_connections`.
 
+### What "ready" means
+
+`ready` describes the **job**: it finished and the index is searchable. It never
+means the whole repository history was imported. `get_index_stats` reports the
+real extent:
+
+```json
+{
+  "total_documents": 48,
+  "bounds": {
+    "recorded": true,
+    "indexed_pr_count": 60,
+    "oldest_pr_number": 61, "newest_pr_number": 120,
+    "oldest_pr_updated_at": "2024-01-02T00:00:00Z",
+    "newest_pr_updated_at": "2024-05-09T00:00:00Z",
+    "configured_pr_limit": 60, "configured_pages": 2,
+    "history_truncated": true
+  },
+  "history_complete": false,
+  "coverage": "PARTIAL HISTORY: 60 PRs indexed (#61 to #120, last updated 2024-01-02 to 2024-05-09), import limit 60 PRs (2 pages). GitHub has older PRs that were NOT imported. Scope: merged and closed pull requests only (open PRs are never fetched)."
+}
+```
+
+- `history_truncated: true` means the first import hit its page cap and GitHub
+  still had older PRs. `false` means pagination reached the end.
+- `history_truncated: null` (or `bounds: {"recorded": false}`) means the extent
+  was never recorded, which is the case for an index built before this field
+  existed. Delete and re-index to record it.
+- Dates are each PR's `updatedAt` (the field PRs are paginated by), not their
+  creation date. Open PRs are never fetched, so even a complete import covers
+  merged and closed PRs only.
+- The numbers live in the cursor database (`indexed_prs` rows plus columns on
+  `index_cursors`) and are deleted with the index.
+
 ### Job states
 
 ```mermaid

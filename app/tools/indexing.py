@@ -7,6 +7,7 @@ from mcp.server.fastmcp import Context
 from auth import GitHubAuthorizationError
 from app.state import is_temporary
 from fetcher import fetch_prs
+from fetcher.queries import PRS_PER_PAGE
 from storage import (
     IndexInvalidatedError,
     checkpoint_refresh,
@@ -20,12 +21,29 @@ from storage import (
     repo_is_indexed_permanently,
     repo_is_indexed_temporarily,
     mark_repo_checked,
+    describe_coverage,
+    get_index_bounds,
+    history_complete,
 )
 
 
 _INDEX_JOBS: dict[str, dict] = {}
 _INDEX_JOBS_LOCK = threading.Lock()
 _INDEX_TASKS: dict[str, asyncio.Task] = {}
+
+
+# "ready" describes the job, not the repository. Say so wherever it is reported.
+READY_MEANS = (
+    "The indexing job finished and the index is searchable. This does NOT mean the "
+    "whole repository history was imported; read 'coverage' and 'bounds' in this "
+    "report for the PRs and dates actually covered."
+)
+
+
+def _coverage_line(repo_key: str, temporary: bool, namespace: str | None) -> str:
+    return "Coverage: " + describe_coverage(
+        get_index_bounds(repo_key, temporary=temporary, namespace=namespace)
+    )
 
 
 def _namespace_scope(namespace: str | None) -> str:
@@ -174,7 +192,8 @@ def register_indexing_tools(mcp):
             stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=False, namespace=namespace)
             return (
                 f"{repo_key} is already indexed permanently on disk.\n"
-                f"{stats['total_documents']} documents loaded and ready.\n"
+                f"{stats['total_documents']} documents loaded.\n"
+                f"{_coverage_line(repo_key, False, namespace)}\n"
                 f"Active repo set to {repo_key}."
                 f"{namespace_text(namespace)}"
             )
@@ -186,7 +205,8 @@ def register_indexing_tools(mcp):
             stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=True, namespace=namespace)
             return (
                 f"{repo_key} is already indexed in memory.\n"
-                f"{stats['total_documents']} documents loaded and ready.\n"
+                f"{stats['total_documents']} documents loaded.\n"
+                f"{_coverage_line(repo_key, True, namespace)}\n"
                 f"Active repo set to {repo_key}."
                 f"{namespace_text(namespace)}"
             )
@@ -360,10 +380,14 @@ def register_indexing_tools(mcp):
                         status="ready",
                         documents_indexed=0,
                         truncated_connections=[],
+                        message=READY_MEANS,
                         finished_at=datetime.now(timezone.utc).isoformat(),
                     )
                     return
 
+                # Only a full import establishes how far back history reaches. An
+                # incremental refresh adds newer PRs and says nothing about it.
+                records_import_bounds = not is_incremental_refresh and not isinstance(fetched, list)
                 count = await asyncio.to_thread(
                     index_prs,
                     repo_key,
@@ -372,6 +396,9 @@ def register_indexing_tools(mcp):
                     namespace=namespace,
                     advance_watermark=not (is_incremental_refresh and not fetch_complete),
                     expected_epoch=expected_epoch,
+                    history_truncated=(not fetch_complete) if records_import_bounds else None,
+                    pr_limit=pages * PRS_PER_PAGE if records_import_bounds else None,
+                    pages=pages if records_import_bounds else None,
                 )
                 if is_incremental_refresh and not fetch_complete:
                     await asyncio.to_thread(
@@ -436,6 +463,7 @@ def register_indexing_tools(mcp):
                     status="ready",
                     documents_indexed=count,
                     truncated_connections=truncated_connections,
+                    message=READY_MEANS,
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
                 print(f"[+] Background indexing finished for {repo_key}. {count} docs parsed.", file=sys.stderr)
@@ -579,7 +607,12 @@ def register_indexing_tools(mcp):
         file_path: str | None = None,
         ctx: Context | None = None,
     ) -> str:
-        """Return indexed document count and storage scope for the selected repo."""
+        """Return document count, storage scope, job status and the real import bounds.
+
+        ``bounds`` and ``coverage`` state how many PRs were imported, their PR
+        number and date range, the configured limit, and whether older history
+        was left behind. A ``ready`` job means only that indexing finished.
+        """
         if ctx is None:
             raise ValueError("Context is required")
 
@@ -593,5 +626,8 @@ def register_indexing_tools(mcp):
             temporary = bool(job.get("temporary"))
 
         stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=temporary, namespace=namespace)
+        bounds = stats["bounds"] if stats["bounds"].get("recorded") else None
+        stats["history_complete"] = history_complete(bounds)
+        stats["coverage"] = describe_coverage(bounds)
         stats["index_job"] = job
         return json.dumps(stats, indent=2)

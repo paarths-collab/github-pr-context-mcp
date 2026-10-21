@@ -25,6 +25,13 @@ pipx install .
 uvx --from . github-pr-context-mcp
 ```
 
+**Using a uv virtual environment** (isolated, nothing installed globally):
+```bash
+uv venv
+uv pip install .
+uv run github-pr-context-mcp config   # prints the exact MCP client snippet
+```
+
 The package and command name are `github-pr-context-mcp`. If installing a published v0.3 release, use that same name with `uvx` or `pipx`.
 
 ---
@@ -50,7 +57,9 @@ Simply ask your IDE agent:
 The server will:
 1. Check if `owner/repo` is indexed locally.
 2. If not, it will ask if you want **permanent** (disk) or **temporary** (memory) storage.
-3. It will fetch and index the PR history in the background.
+3. It will fetch and index the PR history in the background (the newest `pages × 30` merged/closed PRs).
+
+Indexing finishing does not mean the whole history was imported. `get_index_stats` reports `coverage` and `bounds`: how many PRs were indexed, their PR-number and date range, the configured limit, and whether older history was left behind. Check it before treating results as the repository's complete history.
 
 ### 3. Pure Context Tools
 All history tools return raw JSON material. Your IDE agent reads that material, checks it against the current workspace, and performs the review or implementation itself.

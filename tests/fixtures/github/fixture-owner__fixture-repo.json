@@ -1,0 +1,374 @@
+{
+  "_comment": "Synthetic replay fixture in the exact shape GitHub returns for fetcher.queries.PR_QUERY. Hand-authored, NOT recorded from live GitHub; re-record against a real repository to refresh.",
+  "repo": "fixture-owner/fixture-repo",
+  "pages": [
+    {
+      "request": {
+        "cursor": null
+      },
+      "response": {
+        "data": {
+          "repository": {
+            "pullRequests": {
+              "pageInfo": {
+                "hasNextPage": true,
+                "endCursor": "CURSOR_PAGE_2"
+              },
+              "nodes": [
+                {
+                  "id": "PR_node_7",
+                  "number": 7,
+                  "url": "https://github.com/fixture-owner/fixture-repo/pull/7",
+                  "title": "Add retry with exponential backoff to the HTTP client",
+                  "body": "Retries transient failures in `client.py` using exponential backoff.",
+                  "author": {
+                    "login": "alice",
+                    "__typename": "User"
+                  },
+                  "createdAt": "2024-05-01T09:00:00Z",
+                  "updatedAt": "2024-05-09T12:00:00Z",
+                  "mergedAt": "2024-05-09T12:00:00Z",
+                  "state": "MERGED",
+                  "additions": 10,
+                  "deletions": 2,
+                  "files": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "path": "src/client.py",
+                        "additions": 8,
+                        "deletions": 1,
+                        "changeType": "MODIFIED"
+                      },
+                      {
+                        "path": "tests/test_client.py",
+                        "additions": 8,
+                        "deletions": 1,
+                        "changeType": "MODIFIED"
+                      }
+                    ]
+                  },
+                  "reviewThreads": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "T7a",
+                        "isResolved": false,
+                        "path": "src/client.py",
+                        "line": 42,
+                        "comments": {
+                          "pageInfo": {
+                            "hasNextPage": false
+                          },
+                          "nodes": [
+                            {
+                              "id": "PRRC_c7001",
+                              "url": "https://github.com/fixture-owner/fixture-repo/pull/7#discussion_r001",
+                              "author": {
+                                "login": "bob",
+                                "__typename": "User"
+                              },
+                              "body": "Retries on 4xx hide real client errors; only retry 5xx responses and connection errors.",
+                              "createdAt": "2024-05-08T10:00:00Z",
+                              "diffHunk": "@@ -40,6 +40,12 @@ def request(self, url):\n+        for attempt in range(5):\n+            resp = self._send(url)\n+            if resp.status >= 400:\n+                time.sleep(2 ** attempt)",
+                              "pullRequestReview": {
+                                "url": "https://github.com/fixture-owner/fixture-repo/pull/7#pullrequestreview-7001"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "commits": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "commit": {
+                          "oid": "a1b2c3d",
+                          "message": "Add retry with exponential backoff"
+                        }
+                      }
+                    ]
+                  },
+                  "reviews": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRR_7001",
+                        "url": "https://github.com/fixture-owner/fixture-repo/pull/7#pullrequestreview-7001",
+                        "author": {
+                          "login": "bob",
+                          "__typename": "User"
+                        },
+                        "state": "CHANGES_REQUESTED",
+                        "body": "Please cap the backoff at 60 seconds and add jitter so clients do not retry in lockstep.",
+                        "submittedAt": "2024-05-08T10:05:00Z"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PR_node_6",
+                  "number": 6,
+                  "url": "https://github.com/fixture-owner/fixture-repo/pull/6",
+                  "title": "Bump requests from 2.30.0 to 2.31.0",
+                  "body": "Bumps requests from 2.30.0 to 2.31.0. Release notes: dependency upgrade for security fixes.",
+                  "author": {
+                    "login": "dependabot",
+                    "__typename": "Bot"
+                  },
+                  "createdAt": "2024-04-19T00:00:00Z",
+                  "updatedAt": "2024-04-20T08:00:00Z",
+                  "mergedAt": "2024-04-20T08:00:00Z",
+                  "state": "MERGED",
+                  "additions": 10,
+                  "deletions": 2,
+                  "files": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "path": "requirements.txt",
+                        "additions": 8,
+                        "deletions": 1,
+                        "changeType": "MODIFIED"
+                      }
+                    ]
+                  },
+                  "reviewThreads": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": []
+                  },
+                  "commits": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "commit": {
+                          "oid": "d4e5f6a",
+                          "message": "Bump requests from 2.30.0 to 2.31.0"
+                        }
+                      }
+                    ]
+                  },
+                  "reviews": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRR_6001",
+                        "url": "https://github.com/fixture-owner/fixture-repo/pull/6#pullrequestreview-6001",
+                        "author": {
+                          "login": "github-actions",
+                          "__typename": "Bot"
+                        },
+                        "state": "COMMENTED",
+                        "body": "Automated dependency review passed: no known vulnerabilities in the upgraded package.",
+                        "submittedAt": "2024-04-19T00:10:00Z"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "cursor": "CURSOR_PAGE_2"
+      },
+      "response": {
+        "data": {
+          "repository": {
+            "pullRequests": {
+              "pageInfo": {
+                "hasNextPage": false,
+                "endCursor": null
+              },
+              "nodes": [
+                {
+                  "id": "PR_node_3",
+                  "number": 3,
+                  "url": "https://github.com/fixture-owner/fixture-repo/pull/3",
+                  "title": "Sanitize user input in the search endpoint",
+                  "body": "Escapes the search term before it reaches the database layer.",
+                  "author": {
+                    "login": "alice",
+                    "__typename": "User"
+                  },
+                  "createdAt": "2024-02-10T09:00:00Z",
+                  "updatedAt": "2024-02-14T15:00:00Z",
+                  "mergedAt": "2024-02-14T15:00:00Z",
+                  "state": "MERGED",
+                  "additions": 10,
+                  "deletions": 2,
+                  "files": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "path": "src/search.py",
+                        "additions": 8,
+                        "deletions": 1,
+                        "changeType": "MODIFIED"
+                      }
+                    ]
+                  },
+                  "reviewThreads": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "T3a",
+                        "isResolved": false,
+                        "path": "src/search.py",
+                        "line": 17,
+                        "comments": {
+                          "pageInfo": {
+                            "hasNextPage": false
+                          },
+                          "nodes": [
+                            {
+                              "id": "PRRC_c3001",
+                              "url": "https://github.com/fixture-owner/fixture-repo/pull/3#discussion_r001",
+                              "author": {
+                                "login": "carol",
+                                "__typename": "User"
+                              },
+                              "body": "Use parameterized queries here instead of string formatting to avoid SQL injection.",
+                              "createdAt": "2024-02-12T11:00:00Z",
+                              "diffHunk": "@@ -15,3 +15,4 @@ def search(term):\n-    q = \"SELECT * FROM docs WHERE t LIKE '%\" + term + \"%'\"\n+    q = f\"SELECT * FROM docs WHERE t LIKE '%{term}%'\"",
+                              "pullRequestReview": {
+                                "url": "https://github.com/fixture-owner/fixture-repo/pull/3#pullrequestreview-3001"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "commits": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "commit": {
+                          "oid": "0f1e2d3",
+                          "message": "Escape search term"
+                        }
+                      }
+                    ]
+                  },
+                  "reviews": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRR_3001",
+                        "url": "https://github.com/fixture-owner/fixture-repo/pull/3#pullrequestreview-3001",
+                        "author": {
+                          "login": "carol",
+                          "__typename": "User"
+                        },
+                        "state": "CHANGES_REQUESTED",
+                        "body": "Blocking on the query construction, see inline comment about SQL injection.",
+                        "submittedAt": "2024-02-12T11:05:00Z"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "PR_node_2",
+                  "number": 2,
+                  "url": "https://github.com/fixture-owner/fixture-repo/pull/2",
+                  "title": "Add Dockerfile for local development",
+                  "body": "Adds a Dockerfile so contributors can run the service in a container.",
+                  "author": {
+                    "login": "dave",
+                    "__typename": "User"
+                  },
+                  "createdAt": "2024-01-03T09:00:00Z",
+                  "updatedAt": "2024-01-05T09:00:00Z",
+                  "mergedAt": null,
+                  "state": "CLOSED",
+                  "additions": 10,
+                  "deletions": 2,
+                  "files": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "path": "Dockerfile",
+                        "additions": 8,
+                        "deletions": 1,
+                        "changeType": "MODIFIED"
+                      }
+                    ]
+                  },
+                  "reviewThreads": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": []
+                  },
+                  "commits": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "commit": {
+                          "oid": "9a8b7c6",
+                          "message": "Add Dockerfile"
+                        }
+                      }
+                    ]
+                  },
+                  "reviews": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "id": "PRR_2001",
+                        "url": "https://github.com/fixture-owner/fixture-repo/pull/2#pullrequestreview-2001",
+                        "author": {
+                          "login": "release-bot",
+                          "__typename": "User"
+                        },
+                        "state": "COMMENTED",
+                        "body": "A human account that happens to be named release-bot: pin the base image by digest.",
+                        "submittedAt": "2024-01-04T09:00:00Z"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

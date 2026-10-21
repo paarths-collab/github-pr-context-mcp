@@ -222,12 +222,21 @@ def index_prs(
     namespace: str | None = None,
     advance_watermark: bool = True,
     expected_epoch: int | None = None,
+    history_truncated: bool | None = None,
+    pr_limit: int | None = None,
+    pages: int | None = None,
 ) -> int:
-    """Upsert a successful GitHub batch, then atomically advance its watermark."""
+    """Upsert a successful GitHub batch, then atomically advance its watermark.
+
+    ``history_truncated``, ``pr_limit`` and ``pages`` describe a full import
+    (did it stop before the repository's oldest PR, and what cap applied). They
+    are stored with the cursor so status can state the index's real bounds;
+    leave them ``None`` for an incremental refresh.
+    """
     with _chroma_lock:
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
-        docs, metadatas, ids = build_documents(prs)
+        docs, metadatas, ids = build_documents(prs, repo_key=repo_key)
         stale_ids = _stale_document_ids(collection, prs, ids, metadatas)
 
         ns = _normalize_namespace(namespace)
@@ -251,9 +260,11 @@ def index_prs(
         # Advance only after all Chroma writes succeed. A failed embedding or
         # upsert therefore remains eligible for the next refresh.
         if prs:
+            from storage.cursor_store import cursor_store
+
+            storage_label = "temporary" if temporary else "permanent"
             max_pr = max((pr.get("number", 0) for pr in prs), default=0)
             if max_pr > 0:
-                from storage.cursor_store import cursor_store
 
                 updated_at_values = [
                     value
@@ -264,13 +275,22 @@ def index_prs(
                     repo_key,
                     max_pr,
                     namespace=namespace,
-                    storage="temporary" if temporary else "permanent",
+                    storage=storage_label,
                     last_updated_at=(
                         max(updated_at_values, default=None)
                         if advance_watermark
                         else None
                     ),
                 )
+            cursor_store.record_indexed_prs(
+                repo_key,
+                prs,
+                namespace=namespace,
+                storage=storage_label,
+                pr_limit=pr_limit,
+                pages=pages,
+                history_truncated=history_truncated,
+            )
 
     label = "temporary (in-memory)" if temporary else "permanent (disk)"
     print(f"Indexed {len(docs)} documents for {repo_key} [{label}]", file=sys.stderr)
@@ -348,7 +368,17 @@ def query_similar(
     temporary: bool = False,
     namespace: str | None = None,
     where: dict | None = None,
+    exclude_bots: bool = False,
 ) -> list[dict]:
+    """Return the nearest documents with their author type and evidence links.
+
+    ``exclude_bots`` drops documents whose author is a bot. This filters on the
+    derived author type after retrieval rather than in the Chroma ``where``: a
+    metadata clause cannot say "not a bot, or unknown", and Chroma treats a
+    missing key as non-matching, which would hide every document indexed before
+    author types were stored. The fetch widens until ``n_results`` humans are
+    found or the index is exhausted.
+    """
     with _chroma_lock:
         collection = _get_collection(repo_key, temporary=temporary, namespace=namespace)
         total = collection.count()
@@ -367,31 +397,60 @@ def query_similar(
         elif len(where_filter) > 1:
             final_where = {"$and": [{k: v} for k, v in where_filter.items()]}
 
-        results = collection.query(
-            query_embeddings=[encode(query_text)],
-            n_results=n_results,
-            where=final_where,
-            include=["documents", "metadatas", "distances"],
-        )
+        embedding = encode(query_text)
+        fetch = n_results
+        while True:
+            results = collection.query(
+                query_embeddings=[embedding],
+                n_results=fetch,
+                where=final_where,
+                include=["documents", "metadatas", "distances"],
+            )
+            hits = [
+                _hit(doc, meta, dist)
+                for doc, meta, dist in zip(
+                    (results["documents"] or [[]])[0],
+                    (results["metadatas"] or [[]])[0],
+                    (results["distances"] or [[]])[0],
+                )
+            ]
+            if not exclude_bots:
+                return hits
+            humans = [hit for hit in hits if hit["author_type"] != "bot"]
+            if len(humans) >= n_results or fetch >= total:
+                return humans[:n_results]
+            fetch = min(total, fetch * 4)
 
-    if not results["documents"] or not results["documents"][0]:
-        return []
 
-    return [
-        {
-            "text": doc,
-            "metadata": {
-                k: v for k, v in meta.items() 
-                if k not in {"namespace", "files", "author_is_bot", "is_bot"}
-            },
-            "similarity": round(1 - dist, 4),
-        }
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        )
-    ]
+_HIDDEN_METADATA = {
+    "namespace", "files", "author_is_bot", "is_bot", "author_type",
+    "pr_url", "review_url", "comment_url",
+}
+
+
+def _hit_author_type(meta: dict) -> str:
+    stored = meta.get("author_type")
+    if stored in {"human", "bot"}:
+        return stored
+    # Documents indexed before author types were stored carry only a flag.
+    for legacy_flag in ("is_bot", "author_is_bot"):
+        if legacy_flag in meta:
+            return "bot" if meta[legacy_flag] else "human"
+    return "unknown"
+
+
+def _hit(doc: str, meta: dict, distance: float) -> dict:
+    return {
+        "text": doc,
+        "metadata": {k: v for k, v in meta.items() if k not in _HIDDEN_METADATA},
+        "similarity": round(1 - distance, 4),
+        "author_type": _hit_author_type(meta),
+        "links": {
+            "pr": meta.get("pr_url") or None,
+            "review": meta.get("review_url") or None,
+            "comment": meta.get("comment_url") or None,
+        },
+    }
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -427,6 +486,16 @@ def get_collection_stats(
             except Exception:
                 pass
 
+    bounds = None
+    if count:
+        from storage.cursor_store import cursor_store
+
+        bounds = cursor_store.get_bounds(
+            repo_key,
+            namespace=namespace,
+            storage="temporary" if temporary else "permanent",
+        )
+
     return {
         "repo": repo_key,
         "namespace": ns,
@@ -436,6 +505,7 @@ def get_collection_stats(
         "last_checked_at": last_checked,
         "days_old": days_old,
         "is_stale": is_stale,
+        "bounds": bounds or {"recorded": False},
     }
 
 

@@ -1,5 +1,6 @@
 """Storage facade with lightweight cursor access and lazy vector imports."""
 
+from storage.coverage import describe_coverage, history_complete
 from storage.cursor_store import cursor_store
 
 
@@ -47,6 +48,16 @@ def get_refresh_state(
     )
 
 
+def get_index_bounds(
+    repo_key: str, namespace: str | None = None, temporary: bool = False
+) -> dict | None:
+    return cursor_store.get_bounds(
+        repo_key,
+        namespace=namespace,
+        storage="temporary" if temporary else "permanent",
+    )
+
+
 _VECTOR_EXPORTS = {
     "index_prs",
     "query_similar",
@@ -78,5 +89,8 @@ __all__ = [
     "set_max_pr_number",
     "get_last_updated_at",
     "get_refresh_state",
+    "get_index_bounds",
+    "describe_coverage",
+    "history_complete",
     "cursor_store",
 ]

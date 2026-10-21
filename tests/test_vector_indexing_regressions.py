@@ -81,6 +81,13 @@ class _CursorStore:
         self.clear_calls = []
         self.checkpoint_calls = []
         self.complete_calls = []
+        self.recorded_pr_calls = []
+
+    def record_indexed_prs(self, *args, **kwargs):
+        self.recorded_pr_calls.append((args, kwargs))
+
+    def get_bounds(self, *args, **kwargs):
+        return None
 
     def set_cursor(self, *args, **kwargs):
         self.set_calls.append((args, kwargs))
@@ -122,7 +129,7 @@ def _load_vector_store(monkeypatch):
 
     builder = types.ModuleType("storage.document_builder")
 
-    def build_documents(prs):
+    def build_documents(prs, repo_key=None):
         docs, metadatas, ids = [], [], []
         for pr in prs:
             for document in pr.get("documents", []):

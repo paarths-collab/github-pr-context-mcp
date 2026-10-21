@@ -80,7 +80,7 @@ legacy hosted settings; `get_usage_stats` requires usage tracking to be enabled.
 | `ensure_repo_ready` | A repository is new, changed, or not selected. | Index state or a background-indexing acknowledgement. |
 | `set_active_repo` | The task moves to a previously indexed repository. | Active-repository state. |
 | `list_indexed_repos` | The user asks what is available. | Indexed repositories and storage information. |
-| `get_index_stats` | The agent needs to check whether indexing has produced documents. | Document count and index metadata. |
+| `get_index_stats` | The agent needs to check whether indexing has produced documents, and how much history they cover. | Document count, job status, and `bounds` / `coverage` (PRs indexed, PR and date range, import limit, whether history was truncated). |
 | `delete_repo_index` | The user explicitly asks to remove an index. | Deletion result. |
 | `semantic_search_reviews` | A technical question needs past review evidence. | Similar historical snippets. |
 | `find_similar_errors` | Investigating a recurring error or stack trace. | Similar historical discussions. |
@@ -94,6 +94,35 @@ legacy hosted settings; `get_usage_stats` requires usage tracking to be enabled.
 | `get_repo_rules_material` | Creating or refreshing repository-local agent instructions. | Rules material only; the IDE agent writes the file. |
 | `update_settings` | A hosted deployment exposes personal settings. | Configuration result. It is not a reasoning tool. |
 | `get_usage_stats` | An authorized administrator asks for usage data. | Aggregate usage information. |
+
+## Evidence in retrieval results
+
+Every hit from a retrieval tool has this shape (extra `metadata` keys omitted):
+
+```json
+{
+  "text": "PR #3 | File: src/search.py | Line: 17 ...",
+  "similarity": 0.81,
+  "author_type": "human",
+  "links": {
+    "pr": "https://github.com/owner/repo/pull/3",
+    "review": "https://github.com/owner/repo/pull/3#pullrequestreview-3001",
+    "comment": "https://github.com/owner/repo/pull/3#discussion_r001"
+  },
+  "metadata": {"type": "review_comment", "pr_number": 3, "file": "src/search.py"}
+}
+```
+
+- A link is `null` when GitHub has no such object: a PR description has no
+  review or comment, and a review summary has no separate comment.
+- `author_type` is `bot` when GitHub's actor type is `Bot` (or, for payloads
+  without a type, from the `[bot]` login suffix and known bot names); otherwise
+  `human`. Documents indexed by an older version without a stored type are
+  labelled from their legacy flag, or `unknown`.
+- Every retrieval tool accepts `exclude_bots=true` to drop bot-authored hits.
+  Inline review comments by bots are never indexed, so the filter matters for PR
+  descriptions, review summaries and commit messages. A commit message takes its
+  PR author's type, because commit authors are not fetched.
 
 ## Examples
 
