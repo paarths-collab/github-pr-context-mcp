@@ -42,6 +42,9 @@ test = [
 # from the repo root and picks up scratch/ helpers whose names happen to match
 # pytest's default `*_test.py` pattern, failing at import.
 testpaths = ["tests"]
+markers = [
+    "e2e: fresh wheel install + stdio MCP client session (needs uv; skip with E2E_SKIP=1 or -m 'not e2e')",
+]
 
 [project.scripts]
 github-pr-context-mcp = "entrypoints.local.server:main"

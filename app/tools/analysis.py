@@ -1,10 +1,10 @@
 import asyncio
-import json
 from mcp.server.fastmcp import Context
 from app.retrieval import (
     DEFAULT_BUDGET,
     GUIDANCE_SUFFIX,
     evidence_response,
+    dump_envelope,
     fetch_evidence,
 )
 from app.state import (
@@ -319,4 +319,4 @@ def register_analysis_tools(mcp):
         """
         repo_key, namespace, temporary = await _scope(ctx, repo, namespace, file_path, "get_evidence")
         envelope = await asyncio.to_thread(fetch_evidence, repo_key, namespace, temporary, evidence_id)
-        return json.dumps(envelope, indent=2)
+        return dump_envelope(envelope)

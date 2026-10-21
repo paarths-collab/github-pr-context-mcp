@@ -90,11 +90,27 @@ _ACTIONS = {
     "unknown": "The last indexing job failed. Call get_index_stats for details, then retry ensure_repo_ready.",
 }
 
-_REVERSAL_RE = re.compile(
-    r"revert|\bundo\b|\bno longer\b|\binstead of\b|\bremove the\b|\bstop using\b|"
-    r"deprecat|\bdon['’]?t use\b|\breplace\b[^\n]{0,80}?\bwith\b",
-    re.IGNORECASE,
+# Reversal-phrase categories.  The matched text is repository-controlled, so it
+# is NEVER copied into guidance: only the fixed label of the category is used.
+_REVERSAL_CATEGORIES: tuple[tuple[str, re.Pattern], ...] = (
+    ("revert/undo", re.compile(r"revert|\bundo\b", re.IGNORECASE)),
+    ("no-longer/instead-of", re.compile(r"\bno longer\b|\binstead of\b", re.IGNORECASE)),
+    ("removal", re.compile(r"\bremove the\b", re.IGNORECASE)),
+    (
+        "stop-using/deprecation",
+        re.compile(r"\bstop using\b|deprecat|\bdon['’]?t use\b", re.IGNORECASE),
+    ),
+    ("replacement", re.compile(r"\breplace\b[^\n]{0,80}?\bwith\b", re.IGNORECASE)),
 )
+MAX_SHARED_PATHS = 5
+
+
+def _reversal_category(text: str) -> str | None:
+    """Fixed label of the first reversal-phrase category found in ``text``."""
+    for label, pattern in _REVERSAL_CATEGORIES:
+        if pattern.search(text):
+            return label
+    return None
 
 
 # ── index state ───────────────────────────────────────────────────────────────
@@ -131,8 +147,10 @@ def _fallback_state(repo: str, namespace: str | None, temporary: bool, stats: di
         state = "indexing"
     elif not serving:
         state = "failed" if last_status == "failed" else "no_index"
-    elif last_status == "failed":
+    elif last_status == "failed" or registry.get("last_refresh_status") == "failed":
         state = "stale"
+        error_kind = error_kind if last_status == "failed" else registry.get("last_refresh_error_kind")
+        last_status = "failed"
         stale_reason = f"the last refresh failed ({error_kind or 'unknown'}); the previous generation is still served"
     elif stats.get("is_stale"):
         state = "stale"
@@ -207,40 +225,93 @@ def _author_type(meta: dict) -> str:
     return "unknown"
 
 
-def project_unit(repo: str, hit: dict, *, score: float, match: str) -> dict:
-    """Project a stored document to the contract's evidence-unit shape."""
+def project_unit(repo: str, hit: dict, *, score: float | None, match: str) -> dict:
+    """Project a stored document to the contract's evidence-unit shape.
+
+    Unit schema (``results[*]``, and every item of the legacy per-tool keys
+    ``historical_context`` / ``patterns`` / ``similar_historical_discussions`` /
+    ``testing_history`` / ``style_history`` / ``refactor_history`` /
+    ``security_history`` / ``rules_material``)::
+
+        evidence_id, source_url, pr_url, pr_number, source_kind, author, author_type,
+        is_bot, created_at, updated_at, observed_at, original_commit|null,
+        original_path|null, line|null, excerpt (verbatim, UNTRUSTED), thread_incomplete,
+        part_index, part_count, score|null, match, current_applicability
+
+    ``match`` is semantic | exact | both | lexical for search results and ``id``
+    for a ``get_evidence`` direct lookup (where ``score`` is ``null``: nothing was
+    ranked).
+
+    Backward-compatibility fields for clients written against the pre-envelope
+    shape (they read ``item['text']`` / ``item['metadata']`` / ``item['similarity']``):
+    ``text`` (= ``excerpt``), ``similarity`` (= ``score``) and ``metadata``
+    (``type``, ``pr_number``, ``author``, ``file``, ``original_path``, ``is_bot``,
+    ``url``, ``resolved``, ``touches_ci``).  New clients should use the top-level
+    fields; the legacy ones duplicate them and count toward the token budget.
+    """
     meta = hit.get("metadata") or {}
     pr_number = _int_or_none(meta.get("pr_number"))
     constructed = f"https://github.com/{repo}/pull/{pr_number}" if pr_number is not None else None
     pr_url = _str(meta.get("pr_url")) or constructed
     source_url = _str(meta.get("source_url")) or pr_url
+    excerpt = excerpt_from_document(hit.get("text") or "")
+    original_path = _str(meta.get("original_path")) or _str(meta.get("file")) or None
+    rounded = None if score is None else round(float(score), 5)
+    is_bot = is_bot_metadata(meta)
+    author = _str(meta.get("author"))
     return {
         "evidence_id": _str(meta.get("evidence_id")) or _str(hit.get("id")),
         "source_url": source_url,
         "pr_url": pr_url,
         "pr_number": pr_number,
         "source_kind": source_kind_of(meta),
-        "author": _str(meta.get("author")),
+        "author": author,
         "author_type": _author_type(meta),
-        "is_bot": is_bot_metadata(meta),
+        "is_bot": is_bot,
         "created_at": _str(meta.get("created_at")),
         "updated_at": _str(meta.get("updated_at")),
         "observed_at": _str(meta.get("observed_at")),
         "original_commit": _str(meta.get("original_commit")) or None,
-        "original_path": _str(meta.get("original_path")) or _str(meta.get("file")) or None,
+        "original_path": original_path,
         "line": _int_or_none(meta.get("line")),
-        "excerpt": excerpt_from_document(hit.get("text") or ""),
+        "excerpt": excerpt,
         "thread_incomplete": bool(meta.get("thread_incomplete", False)),
         "part_index": _int_or_none(meta.get("part_index")) or 0,
         "part_count": _int_or_none(meta.get("part_count"), 1) or 1,
-        "score": round(float(score), 5),
+        "score": rounded,
         "match": match,
         "current_applicability": "not_assessed",
+        # Legacy (pre-envelope) fields - see the docstring.
+        "text": excerpt,
+        "similarity": rounded,
+        "metadata": {
+            "type": _str(meta.get("type")),
+            "pr_number": pr_number,
+            "author": author,
+            "file": original_path or "",
+            "original_path": original_path or "",
+            "is_bot": is_bot,
+            "url": source_url,
+            "resolved": bool(meta.get("resolved", meta.get("is_resolved", False))),
+            "touches_ci": bool(meta.get("touches_ci", False)),
+        },
     }
 
 
 def estimate_tokens(unit: dict) -> int:
-    return math.ceil(len(json.dumps(unit, ensure_ascii=False)) / 4)
+    """ceil(len(json(unit)) / 4), counted with the same serialisation we emit."""
+    return math.ceil(len(json.dumps(unit, ensure_ascii=JSON_ENSURE_ASCII)) / 4)
+
+
+# ``ensure_ascii=False`` everywhere: the token estimate and every emitter share this
+# setting so the reported ``used_tokens`` describes what is actually sent (escaped
+# \\uXXXX sequences would inflate CJK/emoji text ~6x relative to the estimate).
+JSON_ENSURE_ASCII = False
+
+
+def dump_envelope(envelope: dict) -> str:
+    """Serialise an envelope for a tool response (same settings as the estimate)."""
+    return json.dumps(envelope, indent=2, ensure_ascii=JSON_ENSURE_ASCII)
 
 
 def clamp_budget(budget_tokens) -> int:
@@ -323,24 +394,30 @@ def find_candidate_conflicts(units: list[dict], metas: dict[str, dict]) -> list[
                 continue
             earlier, later = (a, b) if time_a < time_b else (b, a)
             earlier_time, later_time = (time_a, time_b) if time_a < time_b else (time_b, time_a)
-            phrase = _REVERSAL_RE.search(later["excerpt"])
-            if not phrase:
+            category = _reversal_category(later["excerpt"])
+            if not category:
                 continue
             key = (earlier["evidence_id"], later["evidence_id"])
             if key in seen:
                 continue
             seen.add(key)
+            # ``basis`` is guidance: it holds only fixed labels, the category of
+            # reversal phrase and dates parsed from timestamps - never repository
+            # text.  The units are referred to by evidence_ids; the shared file
+            # paths are repository-controlled, so they live in ``shared_paths``
+            # (untrusted data, like excerpts) and not in the sentence.
             conflicts.append(
                 {
                     "evidence_ids": [earlier["evidence_id"], later["evidence_id"]],
                     "basis": (
-                        f"Both units touch {shared[0]}. The later unit (PR #{later['pr_number']}, "
-                        f"{later_time.date().isoformat()}) contains reversal language "
-                        f"('{phrase.group(0)}') and the earlier unit (PR #{earlier['pr_number']}, "
-                        f"{earlier_time.date().isoformat()}) may state the opposite. This is a keyword "
-                        "heuristic: it does not establish that either unit is superseded or still applies; "
-                        "check the current code."
+                        "evidence_ids[0] and evidence_ids[1] are from different pull requests that "
+                        "touch the same file(s) listed in shared_paths. The later unit "
+                        f"(created {later_time.date().isoformat()}) contains {category} language and "
+                        f"the earlier unit (created {earlier_time.date().isoformat()}) may state the "
+                        "opposite. This is a keyword heuristic: it does not establish which unit, if "
+                        "either, still applies; check the current code."
                     ),
+                    "shared_paths": shared[:MAX_SHARED_PATHS],
                     "status": "unresolved",
                 }
             )
@@ -384,8 +461,16 @@ def build_envelope(
     stale_reason: str | None = None,
     action: str | None = None,
     contiguous_budget: bool = False,
+    lookup: bool = False,
 ) -> dict:
-    """Assemble the schema-version-1 envelope: budget, conflicts, warnings."""
+    """Assemble the schema-version-1 envelope: budget, conflicts, warnings.
+
+    ``retrieval_mode`` is ``semantic+lexical`` / ``lexical_degraded`` for a
+    search, ``direct_lookup`` for ``get_evidence`` (units fetched by id, nothing
+    ranked, ``score`` null) and ``none`` when no index could be read at all.
+    ``lookup=True`` suppresses the search-only "no evidence matched this query"
+    warning.
+    """
     requested = clamp_budget(budget_tokens)
     coverage = coverage or _empty_coverage()
     kept, used, omitted = fit_budget(units, requested, contiguous=contiguous_budget)
@@ -415,7 +500,12 @@ def build_envelope(
         notes.append(
             f"{omitted} matching unit(s) were omitted to fit budget_tokens={requested}; raise budget_tokens to see them."
         )
-    if not kept and not omitted and index_state in {"ready_selected_scope", "ready_partial", "stale", "indexing"}:
+    if (
+        not lookup
+        and not kept
+        and not omitted
+        and index_state in {"ready_selected_scope", "ready_partial", "stale", "indexing"}
+    ):
         notes.append("No indexed evidence matched this query. That only describes the indexed scope, not the whole repository history.")
 
     envelope = {
@@ -483,6 +573,84 @@ def _fuse(semantic: list[dict], exact: list[dict]) -> list[tuple[dict, float, st
     return results
 
 
+def _snapshot(repo: str, namespace: str | None, temporary: bool) -> dict:
+    """Stats, coverage and index state of one storage scope."""
+    stats = get_collection_stats(repo, temporary=temporary, namespace=namespace) or {}
+    try:
+        coverage = compute_coverage(repo, namespace, _storage_label(temporary))
+    except Exception as exc:
+        print(f"[*] compute_coverage failed: {exc}", file=sys.stderr)
+        coverage = _empty_coverage()
+    state = describe_state(repo, namespace, temporary, stats, coverage)
+    coverage = state.get("coverage") or coverage
+    serving = int(stats.get("total_documents") or 0) > 0 or int(coverage.get("evidence_units") or 0) > 0
+    return {
+        "temporary": temporary,
+        "stats": stats,
+        "coverage": coverage,
+        "state": state,
+        "index_state": state.get("index_state") or "no_index",
+        "serving": serving,
+    }
+
+
+def resolve_scope(repo: str, namespace: str | None, temporary: bool) -> dict:
+    """Snapshot the requested scope, falling back to the other storage scope.
+
+    A caller that cannot tell where the data lives (nothing is indexed, so there
+    is no remembered storage choice) asks for the permanent scope.  If that scope
+    has no index and no job but the other one has a job or registry state - for
+    example a first import into TEMPORARY storage that failed on authorization -
+    that state is the honest answer, not ``no_index``.
+    """
+    primary = _snapshot(repo, namespace, temporary)
+    if primary["serving"] or primary["index_state"] != "no_index":
+        return primary
+    try:
+        other = _snapshot(repo, namespace, not temporary)
+    except Exception as exc:  # the fallback must never break retrieval
+        print(f"[*] alternate scope lookup failed: {exc}", file=sys.stderr)
+        return primary
+    if other["serving"] or other["index_state"] != "no_index":
+        return other
+    return primary
+
+
+def _unavailable(repo: str, snap: dict, *, lookup: bool) -> tuple[str, str | None]:
+    """(warning, action) for a scope that cannot serve any evidence."""
+    state = snap["state"]
+    index_state = snap["index_state"]
+    last_job = state.get("last_job") or {}
+    action = state.get("action")
+    tail = (
+        "This is NOT evidence that the unit does not exist."
+        if lookup
+        else "This is NOT evidence that the repository has no relevant history."
+    )
+    if index_state == "failed":
+        error_kind = last_job.get("error_kind")
+        action = action or _ACTIONS.get(error_kind or "unknown", _ACTIONS["unknown"])
+        return (
+            f"The index for {repo} is unavailable because the last indexing job failed"
+            f"{f' ({error_kind})' if error_kind else ''}. {action} {tail}",
+            action,
+        )
+    if index_state == "indexing":
+        action = action or "Indexing is in progress; retry shortly."
+        what = "so no evidence unit can be looked up yet" if lookup else "so nothing can be searched yet"
+        return (
+            f"The index for {repo} is still being built (no generation has been published), {what}. {action}",
+            action,
+        )
+    action = action or f"Call ensure_repo_ready for {repo} to build an index."
+    return (
+        f"No index exists for {repo}. {action} "
+        + ("An empty result here does not mean the unit does not exist." if lookup
+           else "An empty result here does not mean the repository has no relevant history."),
+        action,
+    )
+
+
 def search_evidence(
     repo: str,
     namespace: str | None,
@@ -501,43 +669,21 @@ def search_evidence(
     n_results = max(1, min(MAX_RESULTS, int(n_results)))
     source_kinds = [k for k in (source_kinds or []) if isinstance(k, str) and k] or None
 
-    stats = get_collection_stats(repo, temporary=temporary, namespace=namespace) or {}
-    try:
-        coverage = compute_coverage(repo, namespace, _storage_label(temporary))
-    except Exception as exc:
-        print(f"[*] compute_coverage failed: {exc}", file=sys.stderr)
-        coverage = _empty_coverage()
-    state = describe_state(repo, namespace, temporary, stats, coverage)
-    coverage = state.get("coverage") or coverage
-    index_state = state.get("index_state") or "no_index"
-    serving = int(stats.get("total_documents") or 0) > 0 or int(coverage.get("evidence_units") or 0) > 0
+    snap = resolve_scope(repo, namespace, temporary)
+    temporary = snap["temporary"]
+    stats, coverage, state = snap["stats"], snap["coverage"], snap["state"]
+    index_state = snap["index_state"]
+    serving = snap["serving"]
     generation = stats.get("generation")
     if not isinstance(generation, int):
         generation = state.get("serving_generation") or state.get("generation") or coverage.get("generation") or 0
 
-    last_job = state.get("last_job") or {}
     action = state.get("action")
-    if index_state in {"no_index", "failed"} or (index_state == "indexing" and not serving):
-        error_kind = last_job.get("error_kind")
-        if index_state == "failed":
-            action = action or _ACTIONS.get(error_kind or "unknown", _ACTIONS["unknown"])
-            message = (
-                f"The index for {repo} is unavailable because the last indexing job failed"
-                f"{f' ({error_kind})' if error_kind else ''}. {action} "
-                "This is NOT evidence that the repository has no relevant history."
-            )
-        elif index_state == "indexing":
-            action = action or "Indexing is in progress; retry shortly."
-            message = f"The index for {repo} is still being built, so nothing can be searched yet. {action}"
-        else:
-            action = action or f"Call ensure_repo_ready for {repo} to build an index."
-            message = (
-                f"No index exists for {repo}. {action} "
-                "An empty result here does not mean the repository has no relevant history."
-            )
+    if not serving and index_state in {"no_index", "failed", "indexing"}:
+        message, action = _unavailable(repo, snap, lookup=False)
         return build_envelope(
             repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
-            retrieval_mode="semantic+lexical", coverage=coverage, units=[], budget_tokens=budget_tokens,
+            retrieval_mode="none", coverage=coverage, units=[], budget_tokens=budget_tokens,
             warnings=[message], action=action,
         )
 
@@ -595,18 +741,28 @@ def search_evidence(
 
 
 def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_id: str) -> dict:
-    """Expand one unit to every part of its thread, wrapped in the envelope."""
+    """Expand one unit to every part of its thread, wrapped in the envelope.
+
+    A direct lookup ranks nothing: ``retrieval_mode`` is ``direct_lookup``, each
+    unit has ``match: "id"`` and ``score: null``.  When no index can be read the
+    mode is ``none`` and the warning is state-aware (indexing / failed /
+    no_index) rather than a search-style "nothing matched".
+    """
     if isinstance(temporary, str):
         temporary = temporary == "temporary"
-    stats = get_collection_stats(repo, temporary=temporary, namespace=namespace) or {}
-    try:
-        coverage = compute_coverage(repo, namespace, _storage_label(temporary))
-    except Exception:
-        coverage = _empty_coverage()
-    state = describe_state(repo, namespace, temporary, stats, coverage)
-    coverage = state.get("coverage") or coverage
-    index_state = state.get("index_state") or "no_index"
+    snap = resolve_scope(repo, namespace, temporary)
+    temporary = snap["temporary"]
+    stats, coverage, state = snap["stats"], snap["coverage"], snap["state"]
+    index_state = snap["index_state"]
     generation = stats.get("generation") if isinstance(stats.get("generation"), int) else coverage.get("generation", 0)
+
+    if not snap["serving"] and index_state in {"no_index", "failed", "indexing"}:
+        message, action = _unavailable(repo, snap, lookup=True)
+        return build_envelope(
+            repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
+            retrieval_mode="none", coverage=coverage, units=[], budget_tokens=BUDGET_MAX,
+            warnings=[message], action=action, lookup=True,
+        )
 
     parts = get_thread_parts(repo, evidence_id, temporary=temporary, namespace=namespace)
     if not parts:
@@ -614,25 +770,18 @@ def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_i
     units: list[dict] = []
     metas: dict[str, dict] = {}
     for part in parts:  # get_thread_parts already orders by part_index
-        unit = project_unit(repo, part, score=1.0, match="exact")
+        unit = project_unit(repo, part, score=None, match="id")
         units.append(unit)
         metas[unit["evidence_id"]] = part.get("metadata") or {}
     warnings: list[str] = []
     if not units:
-        if index_state in {"no_index", "failed"}:
-            warnings.append(
-                f"The index for {repo} is unavailable ({index_state}); {state.get('action') or 'call ensure_repo_ready'}. "
-                "This is not evidence that the unit does not exist."
-            )
-        else:
-            warnings.append(f"No evidence unit with id '{evidence_id}' exists in the active generation of this index.")
-    envelope = build_envelope(
+        warnings.append(f"No evidence unit with id '{evidence_id}' exists in the active generation of this index.")
+    return build_envelope(
         repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
         retrieval_mode="direct_lookup", coverage=coverage, units=units, metas=metas,
         budget_tokens=BUDGET_MAX, warnings=warnings, stale_reason=state.get("stale_reason"),
-        action=state.get("action"), contiguous_budget=True,
+        action=state.get("action"), contiguous_budget=True, lookup=True,
     )
-    return envelope
 
 
 # ── tool glue ─────────────────────────────────────────────────────────────────
@@ -672,4 +821,4 @@ async def evidence_response(
         envelope[key] = value
     if legacy_key:
         envelope[legacy_key] = envelope["results"]
-    return json.dumps(envelope, indent=2)
+    return dump_envelope(envelope)
