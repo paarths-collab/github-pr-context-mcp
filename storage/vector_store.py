@@ -554,7 +554,6 @@ def index_prs(
             staged_meta.update({
                 "generation": new_generation,
                 "last_indexed_at": published_at,
-                "last_checked_at": published_at,
             })
             staged = client.get_or_create_collection(name=staged_name, metadata=staged_meta)
 
@@ -599,6 +598,16 @@ def index_prs(
             # shape); the registry's existing flag - set by complete_refresh() or
             # an earlier is_refresh=True publish - is simply left unchanged.
             refresh_flag = bool(is_refresh)
+            # Only a write that synced with GitHub's newest state may reset the
+            # stale clock: a refresh, the initial import of a scope, or a legacy
+            # caller that did not say (is_refresh None + advance_watermark).  An
+            # older-history backfill (is_refresh False on an existing generation)
+            # must not, or it would hide that the index is out of date.
+            sets_checked = bool(
+                is_refresh
+                or not registry_active
+                or (is_refresh is None and advance_watermark)
+            )
 
             # A delete during staging bumps the epoch; never publish over it.
             _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
@@ -612,6 +621,7 @@ def index_prs(
                 ledger_upserts=ledger_upserts,
                 published_at=published_at,
                 refresh_applied=True if refresh_flag else None,
+                mark_checked=sets_checked,
             )
         except BaseException:
             _safe_delete_collection(client, staged_name)
@@ -759,8 +769,13 @@ def record_job_outcome(
     error_kind: str | None = None,
     finished_at: str | None = None,
     expected_epoch: int | None = None,
+    kind: str | None = None,
 ) -> None:
-    """Record the last indexing job outcome (status, error_kind, finish time)."""
+    """Record the last indexing job outcome (status, error_kind, finish time).
+
+    ``kind`` ("initial" / "refresh" / "backfill") routes refresh and initial
+    outcomes into the separate refresh-health fields as well.
+    """
     label = _storage_label(storage)
     with _chroma_lock:
         _assert_current_epoch(repo_key, label == "temporary", namespace, expected_epoch)
@@ -771,6 +786,7 @@ def record_job_outcome(
             status=status,
             error_kind=error_kind,
             finished_at=finished_at,
+            kind=kind,
         )
 
 
@@ -966,7 +982,12 @@ def source_kind_of(meta: dict) -> str:
         "review_summary": "human_review_summary",
         "commit_message": "commit_message",
     }
-    return legacy.get(str(meta.get("type") or ""), "")
+    derived = legacy.get(str(meta.get("type") or ""), "")
+    # Legacy documents predate source_kind: a bot-authored one maps to the bot kind
+    # so exclude_bots / source_kinds filters and the projection agree.
+    if derived in {"human_review_thread", "human_review_summary"} and is_bot_metadata(meta):
+        return derived.replace("human_", "bot_", 1)
+    return derived
 
 
 def _passes_filters(meta: dict, exclude_bots: bool, source_kinds: list[str] | None) -> bool:

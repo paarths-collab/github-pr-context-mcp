@@ -24,12 +24,14 @@ retrieval tools can import this file cheaply and tests can stub storage.
 * ``ready_partial`` - a generation is published but a requested selection is
   unfinished (capped refresh continuation, or a backfill that stopped early);
 * ``stale`` - a generation is published but the last refresh/backfill failed
-  (the previous generation keeps serving) or the index was last checked more
-  than 30 days ago.  ``stale_reason`` explains which.
+  (the previous generation keeps serving; a failed refresh stays visible until
+  a refresh succeeds, even if a backfill succeeded afterwards) or the index was
+  last checked more than 30 days ago.  ``stale_reason`` explains which.
 """
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 from datetime import datetime, timezone
 
@@ -129,10 +131,30 @@ def _http_status(exc: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
+_STORAGE_FILES = ("/storage/vector_store.py", "/storage/cursor_store.py")
+_CREDENTIAL_HINTS = ("credential", "token", "not authenticated", "not connected", "authoriz")
+
+
+def _raised_in_storage(exc: BaseException) -> bool:
+    return any(f.endswith(_STORAGE_FILES) for f in _traceback_files(exc))
+
+
+def _is_chromadb_error(exc: BaseException) -> bool:
+    return any((cls.__module__ or "").startswith("chromadb") for cls in type(exc).__mro__)
+
+
 def classify_index_error(exc: BaseException) -> str:
-    """Map an indexing exception onto one of :data:`ERROR_KINDS`."""
+    """Map an indexing exception onto one of :data:`ERROR_KINDS`.
+
+    ``storage_error`` is reserved for genuine storage failures: sqlite3 and
+    chromadb errors, and OS errors (disk full, permissions) raised inside the
+    storage layer.  Passing through a storage module in the traceback is NOT
+    enough - a ``KeyError``/``ValueError`` from document building is a data
+    problem and stays ``unknown``.
+    """
     names = _mro_names(exc)
     text = str(exc).lower()
+    from_storage = _raised_in_storage(exc)
 
     if "GitHubAuthorizationError" in names:
         if any(hint in text for hint in _REVOKED_HINTS):
@@ -147,7 +169,9 @@ def classify_index_error(exc: BaseException) -> str:
         return "repository_not_found"
     if status == 403:
         return "rate_limited" if "rate limit" in text else "authorization_required"
-    if isinstance(exc, PermissionError) or "rejected the saved credential" in text:
+    if (isinstance(exc, PermissionError) and not from_storage) or (
+        "rejected the saved credential" in text
+    ):
         return "authorization_revoked"
     if "rate limit" in text:
         return "rate_limited"
@@ -162,12 +186,13 @@ def classify_index_error(exc: BaseException) -> str:
     if any(hint in text for hint in _ENCODER_HINTS):
         return "embeddings_unavailable"
 
-    module = type(exc).__module__ or ""
-    if (
-        module.startswith(("sqlite3", "chromadb"))
-        or any(f.endswith(("/storage/vector_store.py", "/storage/cursor_store.py")) for f in files)
-    ):
+    if isinstance(exc, sqlite3.Error) or _is_chromadb_error(exc):
         return "storage_error"
+    if isinstance(exc, OSError):  # EnvironmentError is an alias of OSError
+        if from_storage:
+            return "storage_error"
+        if any(hint in text for hint in _CREDENTIAL_HINTS):
+            return "authorization_required"
     return "unknown"
 
 
@@ -291,15 +316,29 @@ def describe_index_state(repo: str, namespace: str | None = None, storage="perma
             )
     else:
         days_old = _days_since(coverage.get("checked_at"))
-        if status == "failed":
+        # Refresh health is durable and independent of the latest job: a later
+        # successful backfill must not hide an earlier failed refresh.  It is
+        # cleared only when a refresh (or the initial import) succeeds.
+        refresh_failed = registry.get("last_refresh_status") == "failed"
+        job_failed = status == "failed"
+        if job_failed or refresh_failed:
             state = "stale"
-            kind = (last_job or {}).get("kind")
+            if job_failed:
+                kind = (last_job or {}).get("kind")
+                failed_kind = error_kind
+                what = f"The last {kind or 'refresh/backfill'} job"
+                action = (last_job or {}).get("action") or action_for(error_kind)
+            else:
+                failed_kind = registry.get("last_refresh_error_kind")
+                what = "The last refresh"
+                action = action_for(failed_kind)
+            when = registry.get("last_refresh_finished_at") if not job_failed else None
             stale_reason = (
-                f"The last {kind or 'refresh/backfill'} job failed"
-                f"{f' ({error_kind})' if error_kind else ''}; generation {generation} "
+                f"{what} failed"
+                f"{f' ({failed_kind})' if failed_kind else ''}"
+                f"{f' at {when}' if when else ''}; generation {generation} "
                 "from the previous successful job is still being served."
             )
-            action = (last_job or {}).get("action") or action_for(error_kind)
         elif days_old is not None and days_old > STALE_AFTER_DAYS:
             state = "stale"
             stale_reason = (

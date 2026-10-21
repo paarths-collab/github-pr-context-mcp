@@ -23,6 +23,11 @@ _REGISTRY_COLUMNS = {
     "last_job_status": "TEXT",
     "last_job_error_kind": "TEXT",
     "last_job_finished_at": "TEXT",
+    # Refresh health, tracked separately from the last job: a later successful
+    # backfill must not erase the stale state left by an earlier failed refresh.
+    "last_refresh_status": "TEXT",
+    "last_refresh_error_kind": "TEXT",
+    "last_refresh_finished_at": "TEXT",
 }
 
 
@@ -394,7 +399,8 @@ class CursorStore:
                           active_generation, generation_published_at, last_checked_at,
                           refresh_applied, backfill_cursor, history_complete,
                           backfill_pages_done, last_job_status, last_job_error_kind,
-                          last_job_finished_at
+                          last_job_finished_at, last_refresh_status,
+                          last_refresh_error_kind, last_refresh_finished_at
                    FROM index_cursors
                    WHERE repo_key = ? AND namespace = ? AND storage = ?""",
                 (repo_key, ns, storage),
@@ -418,6 +424,9 @@ class CursorStore:
                 "last_job_status": None,
                 "last_job_error_kind": None,
                 "last_job_finished_at": None,
+                "last_refresh_status": None,
+                "last_refresh_error_kind": None,
+                "last_refresh_finished_at": None,
             }
         history = row[10]
         return {
@@ -437,6 +446,9 @@ class CursorStore:
             "last_job_status": row[12] or None,
             "last_job_error_kind": row[13] or None,
             "last_job_finished_at": row[14] or None,
+            "last_refresh_status": row[15] or None,
+            "last_refresh_error_kind": row[16] or None,
+            "last_refresh_finished_at": row[17] or None,
         }
 
     def mark_checked(
@@ -471,8 +483,14 @@ class CursorStore:
         ledger_removals: list[int] | None = None,
         published_at: str | None = None,
         refresh_applied: bool | None = None,
+        mark_checked: bool = True,
     ) -> None:
         """Atomically make ``generation`` the active one.
+
+        ``mark_checked`` controls whether ``last_checked_at`` is set to the
+        publish time.  Only a write that actually synced with GitHub's newest
+        state (a refresh or the initial import) may set it; an older-history
+        backfill must pass ``False`` so it cannot reset the 30-day stale clock.
 
         In ONE transaction: verify the active generation is still
         ``previous_generation``, carry the previous ledger forward, apply ledger
@@ -543,13 +561,16 @@ class CursorStore:
                 conn.execute(
                     """UPDATE index_cursors SET
                            active_generation = ?, generation_published_at = ?,
-                           last_indexed_at = ?, last_checked_at = ?,
+                           last_indexed_at = ?,
+                           last_checked_at = CASE WHEN ? THEN ? ELSE COALESCE(
+                               last_checked_at, generation_published_at, last_indexed_at) END,
                            refresh_applied = CASE WHEN ? IS NULL THEN refresh_applied ELSE ? END
                        WHERE repo_key = ? AND namespace = ? AND storage = ?""",
                     (
                         generation,
                         published,
                         published,
+                        int(bool(mark_checked)),
                         published,
                         None if refresh_applied is None else int(bool(refresh_applied)),
                         None if refresh_applied is None else int(bool(refresh_applied)),
@@ -662,19 +683,33 @@ class CursorStore:
         status: str,
         error_kind: str | None = None,
         finished_at: str | None = None,
+        kind: str | None = None,
     ) -> None:
-        """Record how the most recent indexing job for this scope ended."""
+        """Record how the most recent indexing job for this scope ended.
+
+        A job of ``kind`` "refresh" or "initial" also updates the separate
+        refresh-health fields; a backfill (or an unknown kind) never touches
+        them, so a failed refresh stays visible until a refresh succeeds.
+        """
         ns = self._namespace_key(namespace)
         storage = self._validate_storage(storage)
         key = (repo_key, ns, storage)
+        finished = finished_at or self._now()
         with self._conn(storage) as conn:
             self._ensure_row(conn, key)
             conn.execute(
                 """UPDATE index_cursors SET last_job_status = ?, last_job_error_kind = ?,
                           last_job_finished_at = ?
                    WHERE repo_key = ? AND namespace = ? AND storage = ?""",
-                (status, error_kind, finished_at or self._now(), *key),
+                (status, error_kind, finished, *key),
             )
+            if kind in {"refresh", "initial"}:
+                conn.execute(
+                    """UPDATE index_cursors SET last_refresh_status = ?,
+                              last_refresh_error_kind = ?, last_refresh_finished_at = ?
+                       WHERE repo_key = ? AND namespace = ? AND storage = ?""",
+                    (status, error_kind, finished, *key),
+                )
 
 
 _DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".github-pr-mcp")

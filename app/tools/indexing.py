@@ -60,6 +60,21 @@ def _claim_index_job(job_key: str, job: dict) -> tuple[bool, dict]:
         return True, dict(job)
 
 
+def _record_failed_job_if_idle(job_key: str, job: dict) -> tuple[bool, dict]:
+    """Record a pre-claim failure unless a job is already queued/running.
+
+    A credential failure that happens while another job owns the scope must not
+    overwrite that job's record (it would hide the running job and let a second
+    caller claim the scope concurrently).
+    """
+    with _INDEX_JOBS_LOCK:
+        existing = _INDEX_JOBS.get(job_key)
+        if existing and existing.get("status") in {"queued", "running"}:
+            return False, dict(existing)
+        _INDEX_JOBS[job_key] = dict(job)
+        return True, dict(job)
+
+
 def _retain_index_task(job_key: str, task: asyncio.Task) -> None:
     """Keep a strong reference to the background task until it finishes."""
     with _INDEX_JOBS_LOCK:
@@ -145,8 +160,12 @@ def _persist_job_outcome(
     expected_epoch: int | None = None,
     *,
     strict: bool = False,
+    kind: str | None = None,
 ) -> None:
     """Record the last job outcome durably (survives restart).
+
+    ``kind`` ("initial"/"refresh"/"backfill") lets the registry track refresh
+    health separately from the last job.
 
     ``strict`` lets an ``IndexInvalidatedError`` (the index was deleted while
     the job ran) propagate so the caller reports cancellation; failure paths
@@ -161,6 +180,7 @@ def _persist_job_outcome(
             error_kind=error_kind,
             finished_at=_now_iso(),
             expected_epoch=expected_epoch,
+            kind=kind,
         )
     except IndexInvalidatedError:
         if strict:
@@ -360,6 +380,14 @@ def register_indexing_tools(mcp):
                     f"{repo_key} is already indexed.{summary}{namespace_text(namespace)}"
                 )
 
+        if backfill:
+            kind = "backfill"
+        elif refresh and target_was_indexed:
+            kind = "refresh"
+        else:
+            kind = "initial"
+        job_key = _job_key(repo_key, namespace, temporary)
+
         # Resolve the credential before claiming a background job. The job then
         # owns only a short-lived local value, never a request context or a
         # direct environment lookup.
@@ -367,26 +395,37 @@ def register_indexing_tools(mcp):
             github_token = await get_github_access_token()
         except GitHubAuthorizationError as exc:
             details = error_details(exc)
-            failed_key = _job_key(repo_key, namespace, temporary)
             now = _now_iso()
-            _set_index_job(
-                failed_key,
-                status="failed",
-                kind="backfill" if backfill else "refresh" if refresh else "initial",
-                repo=repo_key,
-                namespace=namespace,
-                storage=storage,
-                temporary=temporary,
-                refresh=refresh,
-                backfill=backfill,
-                started_at=now,
-                finished_at=now,
-                error=f"{type(exc).__name__}: {exc}",
-                message=None,
-                **details,
+            recorded, existing_job = _record_failed_job_if_idle(
+                job_key,
+                {
+                    "status": "failed",
+                    "kind": kind,
+                    "repo": repo_key,
+                    "namespace": namespace,
+                    "storage": storage,
+                    "temporary": temporary,
+                    "refresh": refresh,
+                    "backfill": backfill,
+                    "started_at": now,
+                    "finished_at": now,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "message": None,
+                    **details,
+                },
             )
+            if not recorded:
+                # Another job owns this scope: leave its record and the durable
+                # outcome alone; this call changes nothing.
+                return (
+                    f"Indexing is already {existing_job['status']} for {repo_key} "
+                    f"[{storage}]. Use get_index_stats to monitor it. (This call "
+                    "could not obtain a GitHub credential and made no change.)"
+                    f"{namespace_text(namespace)}"
+                )
             await asyncio.to_thread(
-                _persist_job_outcome, repo_key, namespace, temporary, "failed", details["error_kind"]
+                _persist_job_outcome, repo_key, namespace, temporary, "failed",
+                details["error_kind"], kind=kind,
             )
             return (
                 f"GitHub connection is required before indexing. {exc}\n"
@@ -404,13 +443,6 @@ def register_indexing_tools(mcp):
             temporary=temporary,
             namespace=namespace,
         )
-        if backfill:
-            kind = "backfill"
-        elif refresh and target_was_indexed:
-            kind = "refresh"
-        else:
-            kind = "initial"
-        job_key = _job_key(repo_key, namespace, temporary)
         started_at = _now_iso()
         job = {
             "status": "queued",
@@ -453,7 +485,7 @@ def register_indexing_tools(mcp):
             """Persist the outcome (epoch protected), then publish the job result."""
             await asyncio.to_thread(
                 _persist_job_outcome, repo_key, namespace, temporary, status, None,
-                expected_epoch, strict=True,
+                expected_epoch, strict=True, kind=kind,
             )
             with _INDEX_JOBS_LOCK:
                 cancelled = (_INDEX_JOBS.get(job_key) or {}).get("status") == "cancelled"
@@ -568,7 +600,10 @@ def register_indexing_tools(mcp):
                             expected_epoch=expected_epoch,
                             is_refresh=False,
                         )
-                    else:
+                    elif kind == "initial":
+                        # Only the initial import syncs with GitHub's newest
+                        # state; an empty backfill says nothing about freshness
+                        # and must not reset the stale clock.
                         await asyncio.to_thread(
                             mark_repo_checked,
                             repo_key,
@@ -766,7 +801,7 @@ def register_indexing_tools(mcp):
                 )
                 await asyncio.to_thread(
                     _persist_job_outcome, repo_key, namespace, temporary, "failed",
-                    details["error_kind"], expected_epoch,
+                    details["error_kind"], expected_epoch, kind=kind,
                 )
                 print(f"[!] Background indexing failed for {repo_key}: {error}", file=sys.stderr)
 

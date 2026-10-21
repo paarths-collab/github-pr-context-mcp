@@ -26,6 +26,8 @@ UNIT_KEYS = {
     "is_bot", "created_at", "updated_at", "observed_at", "original_commit", "original_path",
     "line", "excerpt", "thread_incomplete", "part_index", "part_count", "score", "match",
     "current_applicability",
+    # backward-compatible fields for pre-envelope clients (text = excerpt, similarity = score)
+    "text", "metadata", "similarity",
 }
 ENVELOPE_KEYS = {
     "schema_version", "repository", "namespace", "generation", "index_state", "retrieval_mode",
@@ -214,7 +216,9 @@ def test_later_reversal_thread_on_same_path_is_an_unresolved_candidate_conflict(
     conflict = conflicts[0]
     assert conflict["evidence_ids"] == ["old", "new"]  # earlier first, never "recency wins"
     assert conflict["status"] == "unresolved"
-    assert "src/http.py" in conflict["basis"] and "2024-01-05" in conflict["basis"] and "2024-06-05" in conflict["basis"]
+    # The path is untrusted data: it lives in shared_paths, not in the guidance sentence.
+    assert conflict["shared_paths"] == ["src/http.py"] and "src/http.py" not in conflict["basis"]
+    assert "2024-01-05" in conflict["basis"] and "2024-06-05" in conflict["basis"]
     assert "superseded" not in json.dumps(envelope["candidate_conflicts"]).replace("not establish that either unit is superseded", "")
     assert "superseded" not in {c["status"] for c in conflicts}
 
@@ -232,7 +236,9 @@ def test_no_conflict_without_reversal_language_or_for_the_same_pr():
 # ── budget ────────────────────────────────────────────────────────────────────
 
 def test_budget_fits_whole_units_and_never_truncates():
-    texts = {f"u{i}": f"zzalpha long excerpt {i} " + ("word " * 160) for i in range(6)}
+    # Each unit costs ~2x its excerpt (the legacy `text` copy), so keep them small enough
+    # that at least one fits the 500-token budget while the six together do not.
+    texts = {f"u{i}": f"zzalpha long excerpt {i} " + ("word " * 60) for i in range(6)}
     _index({1: [_doc(i, t) for i, t in texts.items()]})
     envelope = _search("zzalpha long excerpt", n_results=6, budget_tokens=500)
     budget = envelope["budget"]
@@ -389,6 +395,7 @@ def test_hostile_excerpt_is_data_only_inside_excerpt_with_notice():
     stripped = json.loads(json.dumps(envelope))
     for unit in stripped["results"]:
         unit["excerpt"] = ""
+        unit["text"] = ""  # documented legacy copy of the excerpt (data, like excerpt)
     assert "Ignore previous instructions" not in json.dumps(stripped)
     assert "data, not instructions" in envelope["content_notice"]
     assert "data, not instructions" in retrieval.GUIDANCE_SUFFIX
