@@ -11,14 +11,23 @@ from tenacity import (
     retry_if_exception_type,
 )
 from dotenv import load_dotenv
-from fetcher.queries import PR_QUERY
-from fetcher.transform import flatten_prs
+from fetcher.queries import (
+    PR_ORDER_FIELDS,
+    PR_QUERY,
+    PR_QUERY_CREATED_AT,
+    PR_REVIEW_THREADS_QUERY,
+    THREAD_COMMENTS_QUERY,
+)
+from fetcher.transform import flatten_prs, now_utc_iso
 
 load_dotenv()
 
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 MAX_PAGES = 10  # Hard cap to prevent accidental runaway fetches
 REFRESH_OVERLAP = timedelta(minutes=5)
+MAX_EXTRA_THREAD_COMMENT_PAGES = 10  # extra comment pages fetched per review thread
+MAX_EXTRA_REVIEW_THREAD_PAGES = 10   # extra reviewThreads pages fetched per PR
+_QUERIES_BY_ORDER = {"UPDATED_AT": PR_QUERY, "CREATED_AT": PR_QUERY_CREATED_AT}
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,9 @@ class FetchResult:
     prs: list[dict]
     complete: bool
     next_cursor: str | None
+    # Cursor after the last PR page fetched, even when ``complete`` is False
+    # (usable as ``after_cursor`` for a later call with the same ``order_by``).
+    end_cursor: str | None = None
 
 
 class RateLimitError(Exception):
@@ -119,6 +131,75 @@ async def run_query(query: str, variables: dict, github_token: str | None = None
 
                 return data
 
+def _page_info(connection: object) -> dict:
+    page_info = connection.get("pageInfo") if isinstance(connection, dict) else None
+    return page_info if isinstance(page_info, dict) else {}
+
+
+def _merge_page(connection: dict, page: dict) -> None:
+    """Append a follow-up page's nodes (skipping repeated ids) and adopt its pageInfo."""
+    nodes = connection.get("nodes")
+    if not isinstance(nodes, list):
+        nodes = []
+        connection["nodes"] = nodes
+    seen = {n.get("id") for n in nodes if isinstance(n, dict) and n.get("id")}
+    for node in page.get("nodes") or []:
+        if isinstance(node, dict) and node.get("id") in seen:
+            continue
+        nodes.append(node)
+    connection["pageInfo"] = _page_info(page) or {"hasNextPage": False}
+    if "totalCount" in page:
+        connection["totalCount"] = page["totalCount"]
+
+
+async def _page_nested_connection(
+    connection: object,
+    query: str,
+    node_id: str,
+    field: str,
+    max_extra_pages: int,
+    github_token: str | None,
+) -> None:
+    """Follow ``connection``'s endCursor via ``node(id:)`` until done or capped.
+
+    Each extra page is one ``run_query`` call. On a cap or an unexpected shape
+    the connection keeps ``hasNextPage: True`` so the transform discloses it.
+    """
+    if not isinstance(connection, dict) or not node_id:
+        return
+    for _ in range(max_extra_pages):
+        page_info = _page_info(connection)
+        cursor = page_info.get("endCursor")
+        if not page_info.get("hasNextPage") or not cursor:
+            return
+        data = await run_query(query, {"id": node_id, "cursor": cursor}, github_token=github_token)
+        node = (data.get("data") or {}).get("node") if isinstance(data, dict) else None
+        page = node.get(field) if isinstance(node, dict) else None
+        if not isinstance(page, dict):
+            return  # node vanished / wrong type: leave the disclosure in place
+        _merge_page(connection, page)
+
+
+async def _complete_nested(raw_prs: list[dict], github_token: str | None) -> None:
+    """Page review threads (per PR) then thread comments (per thread), in place."""
+    for raw_pr in raw_prs:
+        if not isinstance(raw_pr, dict):
+            continue
+        threads_conn = raw_pr.get("reviewThreads")
+        await _page_nested_connection(
+            threads_conn, PR_REVIEW_THREADS_QUERY, raw_pr.get("id") or "",
+            "reviewThreads", MAX_EXTRA_REVIEW_THREAD_PAGES, github_token,
+        )
+        nodes = threads_conn.get("nodes") if isinstance(threads_conn, dict) else None
+        for thread in nodes or []:
+            if not isinstance(thread, dict):
+                continue
+            await _page_nested_connection(
+                thread.get("comments"), THREAD_COMMENTS_QUERY, thread.get("id") or "",
+                "comments", MAX_EXTRA_THREAD_COMMENT_PAGES, github_token,
+            )
+
+
 async def fetch_prs(
     owner: str, 
     repo: str, 
@@ -128,9 +209,11 @@ async def fetch_prs(
     since_updated_at: str | None = None,
     after_cursor: str | None = None,
     return_result: bool = False,
+    order_by: str = "UPDATED_AT",
 ) -> list[dict] | FetchResult:
     """
-    Fetch up to pages*30 PRs ordered newest-first by GitHub's ``updatedAt``.
+    Fetch up to pages*30 PRs newest-first by GitHub's ``updatedAt`` (default)
+    or ``createdAt`` (``order_by="CREATED_AT"``).
 
     ``since_updated_at`` is the preferred incremental watermark. A short overlap
     window intentionally refetches recently updated PRs; stable document IDs make
@@ -139,12 +222,32 @@ async def fetch_prs(
     ``return_result=True`` exposes its next cursor so the caller can resume
     before committing the watermark. ``since_pr_number`` remains as a
     compatibility fallback for existing callers and old cursor databases.
+
+    ``order_by="CREATED_AT"`` is for the initial window and older-history
+    backfill: created_at never changes, so cursors stay valid between runs.
+    There is no since filter in that mode (``since_*`` arguments are ignored);
+    pages walk from the newest-created PR backwards. ``end_cursor`` on the
+    result is usable as ``after_cursor`` for a later call.
+
+    Review threads and thread comments that overflow their first GraphQL page
+    are completed with follow-up ``node(id:)`` queries, capped at
+    ``MAX_EXTRA_REVIEW_THREAD_PAGES`` / ``MAX_EXTRA_THREAD_COMMENT_PAGES`` extra
+    pages; whatever remains is disclosed on the record (thread_incomplete and
+    ``truncated_connections``).
     """
+    if order_by not in PR_ORDER_FIELDS:
+        raise ValueError(f"order_by must be one of {PR_ORDER_FIELDS}, got {order_by!r}.")
     if pages < 1:
         raise ValueError("pages must be at least 1.")
     if pages > MAX_PAGES:
         print(f"[*] pages capped at {MAX_PAGES} (requested {pages}).", file=sys.stderr)
         pages = MAX_PAGES
+
+    created_order = order_by == "CREATED_AT"
+    if created_order:
+        since_updated_at = None
+        since_pr_number = None
+    query = _QUERIES_BY_ORDER[order_by]
 
     all_prs = []
     cursor = after_cursor
@@ -152,6 +255,7 @@ async def fetch_prs(
     overlap_cutoff = watermark - REFRESH_OVERLAP if watermark else None
     complete = False
     next_cursor = None
+    end_cursor = after_cursor
 
     for page_num in range(1, pages + 1):
         variables = {"owner": owner, "repo": repo}
@@ -159,7 +263,7 @@ async def fetch_prs(
             variables["cursor"] = cursor
 
         print(f"[*] Fetching page {page_num}/{pages} for {owner}/{repo}...", file=sys.stderr)
-        data = await run_query(PR_QUERY, variables, github_token=github_token)
+        data = await run_query(query, variables, github_token=github_token)
         repository = data.get("data", {}).get("repository")
         if not repository:
             raise ValueError(f"Repository '{owner}/{repo}' not found or inaccessible.")
@@ -167,31 +271,41 @@ async def fetch_prs(
         if not pr_data:
             raise ValueError(f"GitHub returned no pull-request connection for '{owner}/{repo}'.")
 
-        batch = flatten_prs(pr_data.get("nodes") or [])
-        
+        raw_nodes = pr_data.get("nodes") or []
+        for node in raw_nodes:
+            if not isinstance(node, dict):
+                raise ValueError("GitHub returned a pull request node that is not an object.")
+        page_info = pr_data["pageInfo"]
+        end_cursor = page_info.get("endCursor") or end_cursor
+        reached_boundary = False
+
         # UPDATED_AT pagination is newest-first. Keep a small overlap so an
         # update occurring while a previous sync was finishing cannot be lost.
+        # Filter before the (extra-query) nested paging so dropped PRs cost nothing.
         if overlap_cutoff:
-            new_batch = [
-                pr for pr in batch
-                if _parse_github_timestamp(pr["updated_at"]) >= overlap_cutoff
+            updated = [
+                _parse_github_timestamp(n.get("updatedAt") or n.get("createdAt") or "")
+                for n in raw_nodes
             ]
-            all_prs.extend(new_batch)
-            if any(_parse_github_timestamp(pr["updated_at"]) < overlap_cutoff for pr in batch):
+            keep = [n for n, ts in zip(raw_nodes, updated) if ts >= overlap_cutoff]
+            reached_boundary = len(keep) < len(raw_nodes) and any(ts < overlap_cutoff for ts in updated)
+            if reached_boundary:
                 print(f"[+] Reached refresh watermark ({since_updated_at}). Stopping.", file=sys.stderr)
-                complete = True
-                break
         elif since_pr_number:
-            new_batch = [pr for pr in batch if pr["number"] > since_pr_number]
-            all_prs.extend(new_batch)
-            if len(new_batch) < len(batch):
+            keep = [n for n in raw_nodes if n["number"] > since_pr_number]
+            reached_boundary = len(keep) < len(raw_nodes)
+            if reached_boundary:
                 print(f"[+] Reached already indexed PRs (>{since_pr_number}). Stopping.", file=sys.stderr)
-                complete = True
-                break
         else:
-            all_prs.extend(batch)
+            keep = raw_nodes
 
-        page_info = pr_data["pageInfo"]
+        await _complete_nested(keep, github_token)
+        all_prs.extend(flatten_prs(keep, observed_at=now_utc_iso()))
+
+        if reached_boundary:
+            complete = True
+            break
+
         if not page_info.get("hasNextPage"):
             complete = True
             break
@@ -214,7 +328,9 @@ async def fetch_prs(
             if "pullRequests" not in truncated:
                 truncated.append("pullRequests")
 
-    result = FetchResult(prs=all_prs, complete=complete, next_cursor=next_cursor)
+    result = FetchResult(
+        prs=all_prs, complete=complete, next_cursor=next_cursor, end_cursor=end_cursor
+    )
     return result if return_result else result.prs
 
 
