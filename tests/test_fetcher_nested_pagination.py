@@ -35,15 +35,16 @@ def _thread(tid: str, comments_conn: dict) -> dict:
 
 
 def _pr(number: int, *, threads_conn: dict, created="2024-05-01T10:00:00Z",
-        updated="2024-05-02T10:00:00Z") -> dict:
+        updated="2024-05-02T10:00:00Z", files=None, commits=None, reviews=None) -> dict:
     return {
         "id": f"PR_{number}", "number": number,
         "url": f"https://github.com/acme/widget/pull/{number}",
         "title": f"PR {number}", "body": "b", "author": {"__typename": "User", "login": "dev"},
         "createdAt": created, "updatedAt": updated, "mergedAt": created,
         "additions": 1, "deletions": 1,
-        "files": _conn([], has_next=False), "reviewThreads": threads_conn,
-        "commits": _conn([], has_next=False), "reviews": _conn([], has_next=False),
+        "files": files or _conn([], has_next=False), "reviewThreads": threads_conn,
+        "commits": commits or _conn([], has_next=False),
+        "reviews": reviews or _conn([], has_next=False),
     }
 
 
@@ -180,6 +181,166 @@ def test_no_follow_up_queries_when_nothing_overflows(monkeypatch):
     calls = _install(monkeypatch, lambda q, v: _page([pr], has_next=False, end=None))
     _run(pages=1)
     assert len(calls) == 1
+
+
+# --- files / commits / reviews overflow --------------------------------------
+
+def _file(n: int) -> dict:
+    return {"path": f"src/f{n}.py", "additions": n, "deletions": 0, "changeType": "MODIFIED"}
+
+
+def _commit(n: int) -> dict:
+    return {"id": f"PRC_{n}", "commit": {
+        "oid": f"oid{n}", "url": f"https://github.com/acme/widget/commit/oid{n}",
+        "message": f"commit {n}", "author": {"name": "Dev", "user": {"login": "dev"}}}}
+
+
+def _review(n: int) -> dict:
+    return {"id": f"R{n}", "url": f"https://github.com/acme/widget/pull/1#r{n}",
+            "author": {"__typename": "User", "login": "rev"}, "state": "APPROVED",
+            "body": f"review {n}", "submittedAt": "2024-05-01T11:00:00Z",
+            "updatedAt": "2024-05-01T11:00:00Z"}
+
+
+# (field, query marker, record key, node factory, id of a node in a record, cap name)
+_CASES = {
+    "files": ("GetPRFiles", _file, lambda r: [f["path"] for f in r["files"]],
+              lambda n: f"src/f{n}.py", "MAX_EXTRA_FILE_PAGES"),
+    "commits": ("GetPRCommits", _commit, lambda r: [c["oid"] for c in r["commits"]],
+                lambda n: f"oid{n}", "MAX_EXTRA_COMMIT_PAGES"),
+    "reviews": ("GetPRReviews", _review, lambda r: [x["github_node_id"] for x in r["reviews"]],
+                lambda n: f"R{n}", "MAX_EXTRA_REVIEW_PAGES"),
+}
+
+
+def _overflow_pr(field, make, nodes, **conn_kwargs):
+    return _pr(1, threads_conn=_conn([], has_next=False),
+               **{field: _conn([make(i) for i in nodes], **conn_kwargs)})
+
+
+def test_files_commits_reviews_overflow_is_paged_and_merged_in_order(monkeypatch):
+    for field, (marker, make, ids_of, ident, _cap) in _CASES.items():
+        pr = _overflow_pr(field, make, range(1, 4), has_next=True, end="c1", total=8)
+        pages = {
+            "c1": _conn([make(i) for i in (4, 5)] + [make(3)], has_next=True, end="c2", total=8),
+            "c2": _conn([make(i) for i in (6, 7, 8)], has_next=False, end="c3", total=8),
+        }
+
+        def handler(query, variables, marker=marker, field=field, pages=pages, pr=pr):
+            if marker in query:
+                assert variables["id"] == "PR_1"
+                return _node_response(field, pages[variables["cursor"]])
+            return _page([pr], has_next=False, end=None)
+
+        calls = _install(monkeypatch, handler)
+        (record,) = _run(pages=1)
+
+        followups = [v for q, v in calls if marker in q]
+        assert [v["cursor"] for v in followups] == ["c1", "c2"], field
+        assert len(calls) == 3, field  # list page + exactly two follow-ups
+        assert ids_of(record) == [ident(i) for i in range(1, 9)], field  # ordered, no repeat
+        assert field not in record["truncated_connections"], field
+
+
+def test_files_commits_reviews_cap_keeps_the_truncation_disclosure(monkeypatch):
+    for field, (marker, make, ids_of, _ident, cap) in _CASES.items():
+        pr = _overflow_pr(field, make, [0], has_next=True, end="p0", total=10_000)
+        counter = {"n": 0}
+
+        def handler(query, variables, marker=marker, field=field, pr=pr, make=make, counter=counter):
+            if marker in query:
+                counter["n"] += 1
+                n = counter["n"]
+                return _node_response(
+                    field, _conn([make(n)], has_next=True, end=f"p{n}", total=10_000))
+            return _page([pr], has_next=False, end=None)
+
+        _install(monkeypatch, handler)
+        (record,) = _run(pages=1)
+
+        assert counter["n"] == getattr(client, cap) == 10, field
+        assert len(ids_of(record)) == 11, field
+        assert field in record["truncated_connections"], field
+
+
+def test_overflow_cap_is_per_connection_not_shared(monkeypatch):
+    pr = _pr(
+        1, threads_conn=_conn([], has_next=False),
+        files=_conn([_file(0)], has_next=True, end="f0", total=999),
+        commits=_conn([_commit(0)], has_next=True, end="k0", total=999),
+        reviews=_conn([_review(0)], has_next=False, total=1),
+    )
+    counters = {"GetPRFiles": 0, "GetPRCommits": 0}
+
+    def handler(query, variables):
+        for marker, field, make in (("GetPRFiles", "files", _file), ("GetPRCommits", "commits", _commit)):
+            if marker in query:
+                counters[marker] += 1
+                n = counters[marker]
+                return _node_response(field, _conn([make(n)], has_next=True, end=f"x{n}", total=999))
+        return _page([pr], has_next=False, end=None)
+
+    _install(monkeypatch, handler)
+    (record,) = _run(pages=1)
+    assert counters == {"GetPRFiles": 10, "GetPRCommits": 10}
+    assert sorted(record["truncated_connections"]) == ["commits", "files"]
+
+
+def test_no_follow_up_for_files_commits_reviews_when_nothing_overflows(monkeypatch):
+    pr = _pr(
+        1, threads_conn=_conn([], has_next=False),
+        files=_conn([_file(1)], has_next=False, end="e", total=1),
+        commits=_conn([_commit(1)], has_next=False, end="e", total=1),
+        reviews=_conn([_review(1)], has_next=False, end="e", total=1),
+    )
+    calls = _install(monkeypatch, lambda q, v: _page([pr], has_next=False, end=None))
+    (record,) = _run(pages=1)
+    assert len(calls) == 1
+    assert record["truncated_connections"] == []
+
+
+def test_follow_up_without_cursor_or_node_keeps_disclosure(monkeypatch):
+    pr = _pr(
+        1, threads_conn=_conn([], has_next=False),
+        files=_conn([_file(1)], has_next=True, end=None, total=500),  # no cursor: cannot page
+        commits=_conn([_commit(1)], has_next=True, end="k", total=500),
+    )
+
+    def handler(query, variables):
+        if "GetPRCommits" in query:
+            return {"data": {"node": None}}  # node vanished
+        return _page([pr], has_next=False, end=None)
+
+    calls = _install(monkeypatch, handler)
+    (record,) = _run(pages=1)
+    assert len(calls) == 2  # list page + one commits attempt, none for files
+    assert sorted(record["truncated_connections"]) == ["commits", "files"]
+
+
+def test_follow_up_queries_target_pull_request_nodes_with_the_right_connection():
+    from fetcher.queries import PR_COMMITS_QUERY, PR_FILES_QUERY, PR_REVIEWS_QUERY
+
+    for query, field, name, size, needle in (
+        (PR_FILES_QUERY, "files", "GetPRFiles", 100, "changeType"),
+        (PR_COMMITS_QUERY, "commits", "GetPRCommits", 100, "oid"),
+        (PR_REVIEWS_QUERY, "reviews", "GetPRReviews", 50, "submittedAt"),
+    ):
+        flat = " ".join(query.split())
+        assert f"query {name}($id: ID!, $cursor: String)" in flat
+        assert "node(id: $id) { ... on PullRequest {" in flat
+        assert f"{field}(first: {size}, after: $cursor)" in flat
+        assert "totalCount" in flat and "pageInfo { hasNextPage endCursor }" in flat
+        assert needle in flat
+
+
+def test_main_query_requests_cursor_and_total_for_files_commits_reviews():
+    from fetcher.queries import PR_QUERY
+
+    flat = " ".join(PR_QUERY.split())
+    for field in ("files(first: 100)", "commits(first: 100)", "reviews(first: 50)"):
+        start = flat.index(field)
+        head = flat[start:start + 90]
+        assert "totalCount" in head and "pageInfo { hasNextPage endCursor }" in head, field
 
 
 def _created_pages():

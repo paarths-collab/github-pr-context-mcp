@@ -42,6 +42,36 @@ __COMMENT_FIELDS__
             }
 """
 
+# Fields requested on every file / commit / review node (page one and follow-ups).
+# PullRequestChangedFile has no id (a file path is unique within a PR), so the
+# merge keys files by path; commits and reviews carry node ids.
+_FILE_FIELDS = """
+            path
+            additions
+            deletions
+            changeType
+"""
+
+_COMMIT_FIELDS = """
+            id
+            commit {
+              oid
+              url
+              message
+              author { name user { login } }
+            }
+"""
+
+_REVIEW_FIELDS = """
+            id
+            url
+            author { __typename login }
+            state
+            body
+            submittedAt
+            updatedAt
+"""
+
 _PR_QUERY_TEMPLATE = """
 query GetPRs($owner: String!, $repo: String!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -69,12 +99,10 @@ query GetPRs($owner: String!, $repo: String!, $cursor: String) {
         additions
         deletions
         files(first: 100) {
-          pageInfo { hasNextPage }
+          totalCount
+          pageInfo { hasNextPage endCursor }
           nodes {
-            path
-            additions
-            deletions
-            changeType
+__FILE_FIELDS__
           }
         }
         reviewThreads(first: 100) {
@@ -85,26 +113,17 @@ __THREAD_FIELDS__
           }
         }
         commits(first: 100) {
-          pageInfo { hasNextPage }
+          totalCount
+          pageInfo { hasNextPage endCursor }
           nodes {
-            commit {
-              oid
-              url
-              message
-              author { name user { login } }
-            }
+__COMMIT_FIELDS__
           }
         }
         reviews(first: 50) {
-          pageInfo { hasNextPage }
+          totalCount
+          pageInfo { hasNextPage endCursor }
           nodes {
-            id
-            url
-            author { __typename login }
-            state
-            body
-            submittedAt
-            updatedAt
+__REVIEW_FIELDS__
           }
         }
       }
@@ -118,6 +137,9 @@ def _expand(template: str) -> str:
     return (
         template.replace("__THREAD_FIELDS__", _THREAD_FIELDS)
         .replace("__COMMENT_FIELDS__", _COMMENT_FIELDS)
+        .replace("__FILE_FIELDS__", _FILE_FIELDS)
+        .replace("__COMMIT_FIELDS__", _COMMIT_FIELDS)
+        .replace("__REVIEW_FIELDS__", _REVIEW_FIELDS)
     )
 
 
@@ -158,6 +180,56 @@ query GetPRReviewThreads($id: ID!, $cursor: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
 __THREAD_FIELDS__
+        }
+      }
+    }
+  }
+}
+""")
+
+# Follow-ups: remaining files / commits / reviews of one pull request (node id
+# of the PR). Page sizes match the main query.
+PR_FILES_QUERY = _expand("""
+query GetPRFiles($id: ID!, $cursor: String) {
+  node(id: $id) {
+    ... on PullRequest {
+      files(first: 100, after: $cursor) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+__FILE_FIELDS__
+        }
+      }
+    }
+  }
+}
+""")
+
+PR_COMMITS_QUERY = _expand("""
+query GetPRCommits($id: ID!, $cursor: String) {
+  node(id: $id) {
+    ... on PullRequest {
+      commits(first: 100, after: $cursor) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+__COMMIT_FIELDS__
+        }
+      }
+    }
+  }
+}
+""")
+
+PR_REVIEWS_QUERY = _expand("""
+query GetPRReviews($id: ID!, $cursor: String) {
+  node(id: $id) {
+    ... on PullRequest {
+      reviews(first: 50, after: $cursor) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+__REVIEW_FIELDS__
         }
       }
     }
