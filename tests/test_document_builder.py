@@ -12,8 +12,11 @@ import hashlib
 import json
 
 from storage.document_builder import (
+    as_of_filter,
+    body_sha256,
     build_documents,
     excerpt_from_document,
+    latest_known_update,
     is_high_quality_comment,
     split_excerpt,
 )
@@ -729,3 +732,185 @@ class TestPrScopedEvidenceIds:
         new = self._pr_with_commit(7, "PR_x", message="fix: new message")
         docs, metas, ids = build_documents([old, new])
         assert len(ids) == 1 and "new message" in docs[0]
+
+
+# ── body-hash archiving and the as-of (historical leakage) filter ─────────────
+
+def _units_of(pr):
+    """(excerpt, metadata) per unit, the excerpt exactly as retrieval returns it."""
+    docs, metadatas, _ = build_documents([pr])
+    return [(excerpt_from_document(d), m) for d, m in zip(docs, metadatas)]
+
+
+class TestBodyHashArchiving:
+
+    def test_every_unit_carries_the_full_sha256_of_its_verbatim_excerpt(self):
+        units = _units_of(_full_pr())
+        assert len(units) == 4  # description, thread, commit, review summary
+        for excerpt, meta in units:
+            assert meta["body_sha256"] == hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
+            assert len(meta["body_sha256"]) == 64
+
+    def test_body_sha256_helper_matches_hashlib(self):
+        assert body_sha256("abc") == hashlib.sha256(b"abc").hexdigest()
+
+    def test_extraction_note_is_not_part_of_the_hash(self):
+        pr = _full_pr(truncated_connections=["files"])
+        for excerpt, meta in _units_of(pr):
+            assert "[Extraction note" not in excerpt
+            assert meta["body_sha256"] == body_sha256(excerpt)
+
+    def test_split_parts_are_each_hashed_over_their_own_part(self):
+        long_body = "\n".join(f"line {i} " + "x" * 90 for i in range(200))
+        units = _units_of(_minimal_pr(body=long_body))
+        assert len(units) > 1
+        assert len({meta["body_sha256"] for _, meta in units}) == len(units)
+        for excerpt, meta in units:
+            assert meta["body_sha256"] == body_sha256(excerpt)
+
+    def test_editing_a_body_changes_the_hash_but_not_the_id_length(self):
+        before = _units_of(_minimal_pr(body="The retry budget is three attempts."))[0][1]
+        after = _units_of(_minimal_pr(body="The retry budget is five attempts."))[0][1]
+        assert before["body_sha256"] != after["body_sha256"]
+        # Ids are unchanged in shape: key + 12-char digest (not the full hash).
+        assert len(before["evidence_id"].rsplit(":", 1)[1]) == 12
+
+    def test_hash_is_added_without_changing_evidence_ids(self):
+        ids = build_documents([_full_pr()])[2]
+        assert ids == [
+            m["evidence_id"] for m in build_documents([_full_pr()])[1]
+        ]
+        for evidence_id, (excerpt, _) in zip(ids, _units_of(_full_pr())):
+            assert evidence_id.endswith(":" + hashlib.sha256(excerpt.encode("utf-8")).hexdigest()[:12])
+
+
+class TestLatestCommentUpdatedAt:
+
+    def _thread_meta(self, comments):
+        pr = _full_pr(threads=[_thread(comments=comments)], body="", commits=[], reviews=[])
+        (_, meta), = _units_of(pr)
+        return meta
+
+    def test_is_max_across_all_comments_not_the_last_comment(self):
+        meta = self._thread_meta([
+            _comment("C1", created_at="2024-01-01T00:00:00Z", updated_at="2024-06-01T00:00:00Z"),
+            _comment("C2", created_at="2024-01-02T00:00:00Z", updated_at="2024-01-02T00:00:00Z"),
+        ])
+        assert meta["updated_at"] == "2024-01-02T00:00:00Z"  # last comment only
+        assert meta["latest_comment_updated_at"] == "2024-06-01T00:00:00Z"
+
+    def test_falls_back_to_created_at_when_updated_at_is_missing(self):
+        meta = self._thread_meta([
+            _comment("C1", created_at="2024-03-03T00:00:00Z", updated_at=""),
+        ])
+        assert meta["latest_comment_updated_at"] == "2024-03-03T00:00:00Z"
+
+    def test_compares_instants_not_strings(self):
+        meta = self._thread_meta([
+            _comment("C1", created_at="2024-01-01T00:00:00Z", updated_at="2024-01-01T10:00:00+05:00"),
+            _comment("C2", created_at="2024-01-01T00:00:00Z", updated_at="2024-01-01T06:00:00Z"),
+        ])
+        # 10:00+05:00 is 05:00Z, earlier than 06:00Z although it sorts later as text.
+        assert meta["latest_comment_updated_at"] == "2024-01-01T06:00:00Z"
+
+    def test_unknown_is_an_empty_string_never_none(self):
+        meta = self._thread_meta([
+            _comment("C1", created_at="", updated_at=""),
+        ])
+        assert meta["latest_comment_updated_at"] == ""
+
+    def test_only_threads_carry_the_field(self):
+        for excerpt, meta in _units_of(_full_pr()):
+            assert ("latest_comment_updated_at" in meta) == (meta["type"] == "review_thread")
+
+    def test_legacy_flat_comments_get_the_field_too(self):
+        pr = _minimal_pr(review_comments=[
+            {"file": "a.py", "line": 3, "author": "bob", "is_bot": False,
+             "body": "Please add a regression test for this.", "created_at": "2024-02-02T00:00:00Z"},
+        ])
+        meta = next(m for _, m in _units_of(pr) if m["type"] == "review_thread")
+        assert meta["latest_comment_updated_at"] == "2024-02-02T00:00:00Z"
+
+
+CUTOFF = "2024-03-01T00:00:00Z"
+
+
+def _hit(evidence_id, created, updated="", latest=None, nested=True):
+    meta = {"evidence_id": evidence_id, "created_at": created, "updated_at": updated or created}
+    if latest is not None:
+        meta["latest_comment_updated_at"] = latest
+    return {"id": evidence_id, "metadata": meta} if nested else {"evidence_id": evidence_id, **meta}
+
+
+class TestAsOfFilter:
+
+    def test_old_comment_edited_after_cutoff_is_excluded_conservatively_but_admitted_created_only(self):
+        # Built through the real pipeline: comment 1 is old (Jan) but was edited in
+        # June; the last comment is also old, so the thread's own updated_at is old.
+        pr = _full_pr(
+            threads=[_thread(comments=[
+                _comment("C1", created_at="2024-01-01T00:00:00Z", updated_at="2024-06-01T00:00:00Z"),
+                _comment("C2", created_at="2024-01-05T00:00:00Z", updated_at="2024-01-05T00:00:00Z"),
+            ])],
+            body="", commits=[], reviews=[],
+        )
+        hits = [{"id": m["evidence_id"], "metadata": m} for _, m in _units_of(pr)]
+        assert hits[0]["metadata"]["updated_at"] == "2024-01-05T00:00:00Z"
+
+        kept, dropped = as_of_filter(hits, CUTOFF)
+        assert kept == []
+        assert [d["evidence_id"] for d in dropped] == [hits[0]["id"]]
+        assert dropped[0]["reason"] == "updated after cutoff"
+        assert dropped[0]["item"] is hits[0]
+
+        naive_kept, naive_dropped = as_of_filter(hits, CUTOFF, created_only=True)
+        assert naive_kept == hits and naive_dropped == []
+
+    def test_created_after_cutoff_is_dropped_by_both_modes(self):
+        hit = _hit("late", "2024-04-01T00:00:00Z")
+        for created_only in (False, True):
+            kept, dropped = as_of_filter([hit], CUTOFF, created_only=created_only)
+            assert kept == [] and dropped[0]["reason"] == "created after cutoff"
+
+    def test_unchanged_old_evidence_is_kept_and_order_is_preserved(self):
+        hits = [
+            _hit("b", "2024-02-01T00:00:00Z", latest="2024-02-02T00:00:00Z"),
+            _hit("x", "2024-05-01T00:00:00Z"),
+            _hit("a", "2024-01-01T00:00:00Z"),
+        ]
+        kept, dropped = as_of_filter(hits, CUTOFF)
+        assert [h["id"] for h in kept] == ["b", "a"]
+        assert [d["evidence_id"] for d in dropped] == ["x"]
+
+    def test_boundary_is_inclusive(self):
+        kept, _ = as_of_filter([_hit("edge", CUTOFF, latest=CUTOFF)], CUTOFF)
+        assert [h["id"] for h in kept] == ["edge"]
+
+    def test_accepts_envelope_units_with_top_level_fields(self):
+        unit = _hit("u", "2024-01-01T00:00:00Z", latest="2024-09-09T00:00:00Z", nested=False)
+        kept, dropped = as_of_filter([unit], CUTOFF)
+        assert kept == [] and dropped[0]["evidence_id"] == "u"
+
+    def test_without_latest_comment_field_falls_back_to_updated_at(self):
+        legacy = _hit("legacy", "2024-01-01T00:00:00Z", updated="2024-08-01T00:00:00Z")
+        assert as_of_filter([legacy], CUTOFF)[0] == []
+        assert latest_known_update(legacy) == "2024-08-01T00:00:00Z"
+
+    def test_missing_or_unparsable_created_at_is_dropped(self):
+        for bad in ("", "not a date"):
+            kept, dropped = as_of_filter([_hit("bad", bad)], CUTOFF)
+            assert kept == [] and dropped[0]["reason"] == "created_at missing or unparsable"
+
+    def test_pr_level_updated_at_does_not_exclude_old_evidence(self):
+        hit = _hit("pr-bumped", "2024-01-01T00:00:00Z")
+        hit["metadata"]["pr_updated_at"] = "2025-01-01T00:00:00Z"
+        assert [h["id"] for h in as_of_filter([hit], CUTOFF)[0]] == ["pr-bumped"]
+
+    def test_timezone_offsets_are_compared_as_instants(self):
+        # 2024-03-01T01:00:00+02:00 is 2024-02-29T23:00:00Z: before the cutoff.
+        kept, _ = as_of_filter([_hit("tz", "2024-03-01T01:00:00+02:00")], CUTOFF)
+        assert len(kept) == 1
+
+    def test_invalid_cutoff_raises(self):
+        with pytest.raises(ValueError):
+            as_of_filter([], "yesterday")
