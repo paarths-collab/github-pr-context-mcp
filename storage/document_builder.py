@@ -11,6 +11,7 @@
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 
 MAX_UNIT_CHARS = 6000
 PART_OVERLAP_CHARS = 400
@@ -141,6 +142,37 @@ def excerpt_from_document(text: str) -> str:
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_HASH_LEN]
+
+
+def body_sha256(text: str) -> str:
+    """Full sha256 hex digest of a verbatim excerpt (the archived body hash)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _parse_time(value: object) -> datetime | None:
+    """Parse an ISO-8601 timestamp (``Z`` or offset); naive values are UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _latest_timestamp(values: list[str]) -> str:
+    """The original string of the latest parseable timestamp, or "" if none."""
+    best: tuple[datetime, str] | None = None
+    for value in values:
+        parsed = _parse_time(value)
+        if parsed is not None and (best is None or parsed > best[0]):
+            best = (parsed, value)
+    return best[1] if best else ""
 
 
 def split_excerpt(text: str, size: int = MAX_UNIT_CHARS, overlap: int = PART_OVERLAP_CHARS) -> list[str]:
@@ -304,6 +336,9 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                 "part_index": index,
                 "part_count": count,
                 "source_key": key,
+                # Archived hash of the verbatim excerpt of THIS unit: lets a later
+                # run detect that the underlying text was edited after indexing.
+                "body_sha256": body_sha256(part),
             }
             metadatas.append(_clean_metadata(meta))
             ids.append(evidence_id)
@@ -391,6 +426,11 @@ def build_documents(prs: list[dict]) -> tuple[list, list, list]:
                      "comment_count": len(comments),
                      "resolved": thread["resolved"],
                      "outdated": thread["outdated"],
+                     # Max updated_at over EVERY comment (an edit to an early
+                     # comment does not move the last comment's timestamp).
+                     "latest_comment_updated_at": _latest_timestamp(
+                         [c["updated_at"] or c["created_at"] for c in comments]
+                     ),
                  })
 
         # Commit messages
@@ -468,3 +508,76 @@ def _clean_metadata(meta: dict) -> dict:
         else:
             cleaned[key] = json.dumps(value, default=str)
     return cleaned
+
+
+# ── historical-leakage guard ──────────────────────────────────────────────────
+
+def _field(item: dict, name: str) -> str:
+    """Read a string field from a unit (top level) or a hit (``metadata``)."""
+    value = item.get(name) if isinstance(item, dict) else None
+    if not isinstance(value, str) or not value:
+        meta = item.get("metadata") if isinstance(item, dict) else None
+        value = meta.get(name) if isinstance(meta, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def _item_id(item: dict) -> str:
+    return _field(item, "evidence_id") or (item.get("id") if isinstance(item, dict) else "") or ""
+
+
+def latest_known_update(item: dict) -> str:
+    """Latest known modification time of a unit/hit, "" when nothing is known.
+
+    The max of ``latest_comment_updated_at`` (threads), ``updated_at`` and
+    ``created_at``.  PR-level ``pr_updated_at`` is deliberately ignored: it moves
+    on any activity and would discard far more history than necessary.
+    """
+    return _latest_timestamp([
+        _field(item, "latest_comment_updated_at"),
+        _field(item, "updated_at"),
+        _field(item, "created_at"),
+    ])
+
+
+def as_of_filter(
+    units_or_hits: list[dict],
+    cutoff_iso: str,
+    *,
+    created_only: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    """Keep only evidence that could have existed, unchanged, at ``cutoff_iso``.
+
+    Accepts envelope units (top-level ``created_at`` ...) or raw hits
+    (``{"id", "metadata": {...}}``).  Returns ``(kept, dropped)``; order is
+    preserved and each ``dropped`` row is ``{"evidence_id", "reason", "item"}``.
+
+    Conservative (default): a unit is kept only when ``created_at <= cutoff``
+    AND its latest known update (see :func:`latest_known_update`) ``<= cutoff``.
+    A body edited after the cutoff may no longer match what was visible at the
+    cutoff, so it is dropped even though the comment itself is old.  A unit whose
+    ``created_at`` is missing/unparsable is dropped (its age cannot be shown).
+
+    ``created_only=True`` reproduces the naive filter (``created_at`` only) so
+    the leakage it admits can be measured against the conservative result.
+    """
+    cutoff = _parse_time(cutoff_iso)
+    if cutoff is None:
+        raise ValueError(f"cutoff_iso is not an ISO-8601 timestamp: {cutoff_iso!r}")
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for item in units_or_hits:
+        created = _parse_time(_field(item, "created_at"))
+        reason = ""
+        if created is None:
+            reason = "created_at missing or unparsable"
+        elif created > cutoff:
+            reason = "created after cutoff"
+        elif not created_only:
+            latest = _parse_time(latest_known_update(item))
+            if latest is not None and latest > cutoff:
+                reason = "updated after cutoff"
+        if reason:
+            dropped.append({"evidence_id": _item_id(item), "reason": reason, "item": item})
+        else:
+            kept.append(item)
+    return kept, dropped

@@ -1,0 +1,742 @@
+{
+  "label": "INVENTED harness smoke-test data. Every repository, person, URL, PR and sentence below is made up. It exists only to exercise eval/run_eval.py end to end and is NOT a benchmark.",
+  "schema": "repos maps owner/repo to a list of PR records in the shape fetcher.transform.flatten_pr returns",
+  "repos": {
+    "demo-org/ledger-service": [
+      {
+        "github_node_id": "PR_ledger-service_11",
+        "number": 11,
+        "url": "https://github.com/demo-org/ledger-service/pull/11",
+        "title": "Add retry wrapper for payment gateway calls",
+        "body": "Wraps outbound gateway requests in a retry helper so transient network failures do not fail a payment.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-01-10T09:00:00Z",
+        "updated_at": "2024-01-10T09:00:00Z",
+        "merged_at": "2024-01-10T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/gateway/client.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_retry",
+            "url": "https://github.com/demo-org/ledger-service/pull/11#discussion_PRRT_ledger_retry_0",
+            "path": "src/gateway/client.py",
+            "line": 42,
+            "original_line": 42,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_retry_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/11#discussion_PRRT_ledger_retry_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Please route this through retry_with_backoff and use exponential delay with jitter, up to 5 attempts.",
+                "created_at": "2024-01-10T10:00:00Z",
+                "updated_at": "2024-01-10T10:00:00Z",
+                "diff_hunk": "@@ -40,3 +40,7 @@\n+    response = session.post(url, json=payload)"
+              },
+              {
+                "id": "PRRC_PRRT_ledger_retry_1",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/11#discussion_PRRT_ledger_retry_1",
+                "author": "dev-one",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Done. I capped the delay at 30 seconds so a flapping gateway cannot pin our worker threads for minutes.",
+                "created_at": "2024-01-10T11:30:00Z",
+                "updated_at": "2024-01-10T11:30:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 2,
+            "comments_total": 2,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_12",
+        "number": 12,
+        "url": "https://github.com/demo-org/ledger-service/pull/12",
+        "title": "Switch ledger writes to idempotency keys",
+        "body": "Ledger writes now carry a caller supplied key so a repeated request cannot post twice.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-01-18T09:00:00Z",
+        "updated_at": "2024-01-18T09:00:00Z",
+        "merged_at": "2024-01-18T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/ledger/writer.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_idempotency",
+            "url": "https://github.com/demo-org/ledger-service/pull/12#discussion_PRRT_ledger_idempotency_0",
+            "path": "src/ledger/writer.py",
+            "line": 88,
+            "original_line": 88,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_idempotency_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/12#discussion_PRRT_ledger_idempotency_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Why trust a header from the caller instead of keeping a server side table of seen requests?",
+                "created_at": "2024-01-18T10:00:00Z",
+                "updated_at": "2024-01-18T10:00:00Z",
+                "diff_hunk": ""
+              },
+              {
+                "id": "PRRC_PRRT_ledger_idempotency_1",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/12#discussion_PRRT_ledger_idempotency_1",
+                "author": "dev-one",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "A table would race across regions because replicas lag. The client generated Idempotency-Key header lets any replica refuse a duplicate without coordination.",
+                "created_at": "2024-01-18T12:00:00Z",
+                "updated_at": "2024-01-18T12:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 2,
+            "comments_total": 2,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_13",
+        "number": 13,
+        "url": "https://github.com/demo-org/ledger-service/pull/13",
+        "title": "Add CSV export for monthly reports",
+        "body": "Adds a CSV export of the monthly statement for finance.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-01-25T09:00:00Z",
+        "updated_at": "2024-01-25T09:00:00Z",
+        "merged_at": "2024-01-25T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/reports/export.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_decimal",
+            "url": "https://github.com/demo-org/ledger-service/pull/13#discussion_PRRT_ledger_decimal_0",
+            "path": "src/reports/export.py",
+            "line": 17,
+            "original_line": 17,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_decimal_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/13#discussion_PRRT_ledger_decimal_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Never use float for money here. Use Decimal and quantize explicitly, otherwise rounding errors will leak into the statement totals.",
+                "created_at": "2024-01-25T10:00:00Z",
+                "updated_at": "2024-08-01T08:00:00Z",
+                "diff_hunk": ""
+              },
+              {
+                "id": "PRRC_PRRT_ledger_decimal_1",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/13#discussion_PRRT_ledger_decimal_1",
+                "author": "dev-one",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Switched the amounts to Decimal.",
+                "created_at": "2024-01-25T13:00:00Z",
+                "updated_at": "2024-01-25T13:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 2,
+            "comments_total": 2,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_14",
+        "number": 14,
+        "url": "https://github.com/demo-org/ledger-service/pull/14",
+        "title": "Rename helper for clarity",
+        "body": "Small rename.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-02-05T09:00:00Z",
+        "updated_at": "2024-02-05T09:00:00Z",
+        "merged_at": "2024-02-05T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/ledger/utils.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_rename",
+            "url": "https://github.com/demo-org/ledger-service/pull/14#discussion_PRRT_ledger_rename_0",
+            "path": "src/ledger/utils.py",
+            "line": 9,
+            "original_line": 9,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_rename_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/14#discussion_PRRT_ledger_rename_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Could we rename this variable to something more descriptive than tmp?",
+                "created_at": "2024-02-05T10:00:00Z",
+                "updated_at": "2024-02-05T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_20",
+        "number": 20,
+        "url": "https://github.com/demo-org/ledger-service/pull/20",
+        "title": "Cache account balances in Redis",
+        "body": "Balance lookups dominate read traffic, so cache them briefly.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-03-12T09:00:00Z",
+        "updated_at": "2024-03-12T09:00:00Z",
+        "merged_at": "2024-03-12T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/cache/balances.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_cache_on",
+            "url": "https://github.com/demo-org/ledger-service/pull/20#discussion_PRRT_ledger_cache_on_0",
+            "path": "src/cache/balances.py",
+            "line": 31,
+            "original_line": 31,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_cache_on_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/20#discussion_PRRT_ledger_cache_on_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "A 60 second TTL for cached balance lookups is acceptable: the read load is heavy and a minute of staleness is fine for the dashboard.",
+                "created_at": "2024-03-12T10:00:00Z",
+                "updated_at": "2024-03-12T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_27",
+        "number": 27,
+        "url": "https://github.com/demo-org/ledger-service/pull/27",
+        "title": "Remove the balance cache",
+        "body": "Reverts the Redis balance cache from #20.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-06-20T09:00:00Z",
+        "updated_at": "2024-06-20T09:00:00Z",
+        "merged_at": "2024-06-20T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/cache/balances.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_cache_off",
+            "url": "https://github.com/demo-org/ledger-service/pull/27#discussion_PRRT_ledger_cache_off_0",
+            "path": "src/cache/balances.py",
+            "line": 31,
+            "original_line": 31,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_cache_off_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/27#discussion_PRRT_ledger_cache_off_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "We should no longer cache balances. Stale values let the overdraft check approve payments it should have rejected, so remove the cache layer entirely.",
+                "created_at": "2024-06-20T10:00:00Z",
+                "updated_at": "2024-06-20T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_ledger-service_33",
+        "number": 33,
+        "url": "https://github.com/demo-org/ledger-service/pull/33",
+        "title": "Tune gateway retry attempts",
+        "body": "Lowers the retry budget after the gateway SLA review.",
+        "author": "dev-one",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-07-09T09:00:00Z",
+        "updated_at": "2024-07-09T09:00:00Z",
+        "merged_at": "2024-07-09T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/gateway/client.py"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_ledger_retry_three",
+            "url": "https://github.com/demo-org/ledger-service/pull/33#discussion_PRRT_ledger_retry_three_0",
+            "path": "src/gateway/client.py",
+            "line": 44,
+            "original_line": 44,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_ledger_retry_three_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/ledger-service/pull/33#discussion_PRRT_ledger_retry_three_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Five attempts is too many given the gateway SLA; reduce the retry helper to 3 attempts so we fail fast and surface the outage.",
+                "created_at": "2024-07-09T10:00:00Z",
+                "updated_at": "2024-07-09T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      }
+    ],
+    "demo-org/web-client": [
+      {
+        "github_node_id": "PR_web-client_5",
+        "number": 5,
+        "url": "https://github.com/demo-org/web-client/pull/5",
+        "title": "Debounce the search input",
+        "body": "Stops firing a request on every keystroke in the search box.",
+        "author": "dev-two",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-02-02T09:00:00Z",
+        "updated_at": "2024-02-02T09:00:00Z",
+        "merged_at": "2024-02-02T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/components/SearchBox.tsx"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_web_debounce",
+            "url": "https://github.com/demo-org/web-client/pull/5#discussion_PRRT_web_debounce_0",
+            "path": "src/components/SearchBox.tsx",
+            "line": 23,
+            "original_line": 23,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_web_debounce_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/web-client/pull/5#discussion_PRRT_web_debounce_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Use the existing useDebouncedValue hook with a 250ms delay instead of pulling in lodash just for this; it keeps the bundle small.",
+                "created_at": "2024-02-02T10:00:00Z",
+                "updated_at": "2024-02-02T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_web-client_6",
+        "number": 6,
+        "url": "https://github.com/demo-org/web-client/pull/6",
+        "title": "Add error boundary around checkout",
+        "body": "Wraps the checkout page so one failing widget cannot take the whole page down.",
+        "author": "dev-two",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-02-14T09:00:00Z",
+        "updated_at": "2024-02-14T09:00:00Z",
+        "merged_at": "2024-02-14T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/checkout/CheckoutPage.tsx"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_web_boundary",
+            "url": "https://github.com/demo-org/web-client/pull/6#discussion_PRRT_web_boundary_0",
+            "path": "src/checkout/CheckoutPage.tsx",
+            "line": 57,
+            "original_line": 57,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_web_boundary_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/web-client/pull/6#discussion_PRRT_web_boundary_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Wrap the payment widget in CheckoutErrorBoundary so a crash there shows a fallback and the customer can still review the order.",
+                "created_at": "2024-02-14T10:00:00Z",
+                "updated_at": "2024-02-14T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_web-client_8",
+        "number": 8,
+        "url": "https://github.com/demo-org/web-client/pull/8",
+        "title": "Persist the cart in localStorage",
+        "body": "Keeps the cart between visits.",
+        "author": "dev-two",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-03-01T09:00:00Z",
+        "updated_at": "2024-03-01T09:00:00Z",
+        "merged_at": "2024-03-01T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/cart/storage.ts"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_web_cart_local",
+            "url": "https://github.com/demo-org/web-client/pull/8#discussion_PRRT_web_cart_local_0",
+            "path": "src/cart/storage.ts",
+            "line": 12,
+            "original_line": 12,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_web_cart_local_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/web-client/pull/8#discussion_PRRT_web_cart_local_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Storing the cart in localStorage is fine for now, but keep the payload small because every read is synchronous.",
+                "created_at": "2024-03-01T10:00:00Z",
+                "updated_at": "2024-03-01T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_web-client_9",
+        "number": 9,
+        "url": "https://github.com/demo-org/web-client/pull/9",
+        "title": "Split the vendor bundle",
+        "body": "Enables chunk splitting for third party code.",
+        "author": "dev-two",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-03-10T09:00:00Z",
+        "updated_at": "2024-03-10T09:00:00Z",
+        "merged_at": "2024-03-10T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "webpack.config.js"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_web_bundle",
+            "url": "https://github.com/demo-org/web-client/pull/9#discussion_PRRT_web_bundle_0",
+            "path": "webpack.config.js",
+            "line": 30,
+            "original_line": 30,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_web_bundle_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/web-client/pull/9#discussion_PRRT_web_bundle_0",
+                "author": "reviewer-ben",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Enable splitChunks for node_modules so a change to app code does not invalidate the vendor bundle cache.",
+                "created_at": "2024-03-10T10:00:00Z",
+                "updated_at": "2024-03-10T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      },
+      {
+        "github_node_id": "PR_web-client_15",
+        "number": 15,
+        "url": "https://github.com/demo-org/web-client/pull/15",
+        "title": "Move the cart to the server",
+        "body": "The cart now lives in the backend and the client only caches it.",
+        "author": "dev-two",
+        "author_is_bot": false,
+        "author_type": "human",
+        "is_bot": false,
+        "observed_at": "2024-09-01T00:00:00Z",
+        "touches_ci": false,
+        "created_at": "2024-05-06T09:00:00Z",
+        "updated_at": "2024-05-06T09:00:00Z",
+        "merged_at": "2024-05-06T09:00:00Z",
+        "state": "MERGED",
+        "additions": 10,
+        "deletions": 2,
+        "files": [
+          {
+            "path": "src/cart/storage.ts"
+          }
+        ],
+        "review_comments": [],
+        "threads": [
+          {
+            "thread_id": "PRRT_web_cart_server",
+            "url": "https://github.com/demo-org/web-client/pull/15#discussion_PRRT_web_cart_server_0",
+            "path": "src/cart/storage.ts",
+            "line": 12,
+            "original_line": 12,
+            "original_commit": null,
+            "is_resolved": true,
+            "is_outdated": false,
+            "comments": [
+              {
+                "id": "PRRC_PRRT_web_cart_server_0",
+                "database_id": null,
+                "url": "https://github.com/demo-org/web-client/pull/15#discussion_PRRT_web_cart_server_0",
+                "author": "reviewer-ana",
+                "author_type": "human",
+                "is_bot": false,
+                "body": "Drop the localStorage persistence. The cart has to be stored on the server so it follows the customer across devices.",
+                "created_at": "2024-05-06T10:00:00Z",
+                "updated_at": "2024-05-06T10:00:00Z",
+                "diff_hunk": ""
+              }
+            ],
+            "comments_fetched": 1,
+            "comments_total": 1,
+            "thread_incomplete": false
+          }
+        ],
+        "nested_incomplete_threads": 0,
+        "commits": [],
+        "reviews": [],
+        "truncated_connections": []
+      }
+    ]
+  }
+}
