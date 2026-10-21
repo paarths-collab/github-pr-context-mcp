@@ -1,7 +1,7 @@
 [project]
 name = "github-pr-context-mcp"
 version = "0.3.3"
-description = "Hardened Pure Context Retrieval Engine for GitHub PR History"
+description = "Find the dated review evidence behind the code: a local MCP server that retrieves GitHub PR review history, with source links, human/bot provenance and honest coverage."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -42,6 +42,9 @@ test = [
 # from the repo root and picks up scratch/ helpers whose names happen to match
 # pytest's default `*_test.py` pattern, failing at import.
 testpaths = ["tests"]
+markers = [
+    "e2e: fresh wheel install + stdio MCP client session (opt-in: run with E2E_RUN=1 or -m e2e; needs uv; E2E_SKIP=1 always skips)",
+]
 
 [project.scripts]
 github-pr-context-mcp = "entrypoints.local.server:main"

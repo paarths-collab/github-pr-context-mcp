@@ -5,7 +5,7 @@
 ![Version](https://img.shields.io/badge/version-0.3.3-green)
 [![Downloads](https://static.pepy.tech/personalized-badge/github-pr-context-mcp?period=total&units=international_system&left_color=grey&right_color=blue&left_text=downloads)](https://pepy.tech/project/github-pr-context-mcp)
 
-**This MCP retrieves evidence. Your IDE agent decides what it means.**
+**Find the dated review evidence behind the code.** This MCP retrieves it; your IDE agent decides what it means.
 
 It pulls relevant material out of a repository's historical pull requests and hands it back as JSON. Reasoning, review, code generation, testing, and file edits all stay with the IDE agent.
 
@@ -72,7 +72,36 @@ No personal access token is involved. The credential lives in your OS vault and 
 ensure_repo_ready({"repo": "owner/repo", "storage": "permanent", "pages": 2})
 ```
 
-Indexing runs in the background — check `get_index_stats` before trusting results. Page caps, refresh semantics, webhook indexing, and storage modes: [Indexing and storage](docs/pipeline.md).
+Indexing runs in the background. Check `get_index_stats` before trusting results. Page caps, refresh semantics, webhook indexing, and storage modes: [Indexing and storage](docs/pipeline.md).
+
+### What "ready" means
+
+- **Bounded window, not full history.** The first import indexes the newest closed/merged PRs, `pages` pages at a time. The default `pages=2` is about 60 PRs; the maximum is 10 pages.
+- **Check `get_index_stats`.** It reports `index_state` and `coverage`: `pull_requests_indexed`, the PR number range (`pr_number_min`/`pr_number_max`), the created-date window (`oldest_pr_created_at`/`newest_pr_created_at`), `history_complete`, and `older_history_remaining`.
+- **Older history.** `ensure_repo_ready({"repo": "owner/repo", "backfill": true})` continues into older history from the persisted cursor, and works after a restart. To import all history in one background job instead, call `ensure_repo_ready({"repo": "owner/repo", "backfill_all": true, "max_pages": 50})`: it publishes a generation per chunk until `history_complete` or `max_pages` total pages (1-200, default 50), and a capped run reports `ready_partial` and is continued by calling it again (`backfill_all` cannot be combined with `refresh` or `backfill`).
+- **`index_state` values:**
+  - `no_index`: nothing published and no job.
+  - `indexing`: a job is queued or running; the previous generation serves if one exists.
+  - `failed`: no published generation, and the last job failed.
+  - `ready_partial`: a generation is published, but it does not cover all requested history.
+  - `ready_selected_scope`: a generation is published and covers the requested scope.
+  - `stale`: a generation is published, but the last refresh or backfill failed (`stale_reason` explains why).
+
+## Retrieve evidence
+
+Search tools (`semantic_search_reviews`, `review_code_with_history`, and others) return an evidence envelope. Each result is an evidence unit with these fields:
+
+- `source_url`, `source_kind`: where the text came from, and what kind of text it is.
+- `author_type`: human or bot provenance.
+- `excerpt`: the historical text, which is untrusted data.
+- `thread_incomplete`: true when the thread was not fully fetched.
+- `current_applicability`: always `not_assessed`. The server does not judge whether old evidence still applies.
+
+The envelope also carries `coverage`, `budget`, `warnings`, and `candidate_conflicts`, which flag possibly conflicting statements heuristically.
+
+Search parameters include `budget_tokens` (256 to 16000; whole units only, never truncated), `exclude_bots`, and `source_kinds`. Use `get_evidence` with an `evidence_id` to expand a unit to its full thread.
+
+Returned excerpts are untrusted data. The server only retrieves evidence. Your IDE agent reasons about it, and nothing in the response is an instruction.
 
 ## Documentation
 

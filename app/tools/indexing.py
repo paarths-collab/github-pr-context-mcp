@@ -1,41 +1,45 @@
 import sys
 import asyncio
-import threading
 import json
 from datetime import datetime, timezone
 from mcp.server.fastmcp import Context
 from auth import GitHubAuthorizationError
+from app.index_status import (
+    BACKFILL_ALL_CONTINUE_ACTION,
+    _INDEX_JOBS,
+    _INDEX_JOBS_LOCK,
+    describe_index_state,
+    error_details,
+    format_index_status,
+    get_index_job,
+    job_key as _job_key,
+)
 from app.state import is_temporary
 from fetcher import fetch_prs
 from storage import (
     IndexInvalidatedError,
     checkpoint_refresh,
     complete_refresh,
+    compute_coverage,
     delete_repo_index as delete_repo_index_storage,
     get_collection_stats,
     get_index_epoch,
+    get_index_registry,
     index_prs,
     get_refresh_state,
     list_all_repos,
+    record_job_outcome,
     repo_is_indexed_permanently,
     repo_is_indexed_temporarily,
     mark_repo_checked,
+    set_backfill_state,
 )
 
-
-_INDEX_JOBS: dict[str, dict] = {}
-_INDEX_JOBS_LOCK = threading.Lock()
+# The job map itself lives in app.index_status so retrieval tools can describe
+# index state without importing this module (and the fetcher/Chroma with it).
 _INDEX_TASKS: dict[str, asyncio.Task] = {}
 
-
-def _namespace_scope(namespace: str | None) -> str:
-    normalized = namespace.strip() if isinstance(namespace, str) else ""
-    return "default:" if not normalized else f"namespace:{normalized}"
-
-
-def _job_key(repo_key: str, namespace: str | None, temporary: bool) -> str:
-    storage = "temporary" if temporary else "permanent"
-    return f"{repo_key}\0{_namespace_scope(namespace)}\0{storage}"
+PAGE_SIZE = 30  # pull requests per GitHub page (used to estimate pages consumed)
 
 
 def _set_index_job(job_key: str, **values) -> dict:
@@ -49,6 +53,21 @@ def _set_index_job(job_key: str, **values) -> dict:
 
 def _claim_index_job(job_key: str, job: dict) -> tuple[bool, dict]:
     """Atomically reserve an index job so duplicate callers cannot both start it."""
+    with _INDEX_JOBS_LOCK:
+        existing = _INDEX_JOBS.get(job_key)
+        if existing and existing.get("status") in {"queued", "running"}:
+            return False, dict(existing)
+        _INDEX_JOBS[job_key] = dict(job)
+        return True, dict(job)
+
+
+def _record_failed_job_if_idle(job_key: str, job: dict) -> tuple[bool, dict]:
+    """Record a pre-claim failure unless a job is already queued/running.
+
+    A credential failure that happens while another job owns the scope must not
+    overwrite that job's record (it would hide the running job and let a second
+    caller claim the scope concurrently).
+    """
     with _INDEX_JOBS_LOCK:
         existing = _INDEX_JOBS.get(job_key)
         if existing and existing.get("status") in {"queued", "running"}:
@@ -79,12 +98,7 @@ def _retain_index_task(job_key: str, task: asyncio.Task) -> None:
 
 def _get_index_job(repo_key: str, namespace: str | None) -> dict | None:
     """Return the newest job for a repository/namespace across both stores."""
-    prefix = f"{repo_key}\0{_namespace_scope(namespace)}\0"
-    with _INDEX_JOBS_LOCK:
-        matches = [job for key, job in _INDEX_JOBS.items() if key.startswith(prefix)]
-        if not matches:
-            return None
-        return dict(max(matches, key=lambda job: job.get("started_at", "")))
+    return get_index_job(repo_key, namespace)
 
 
 def _invalidate_index_job(repo_key: str, namespace: str | None, temporary: bool) -> None:
@@ -130,6 +144,170 @@ Temporary storage
   - Best for one-off exploration.
 """
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _storage_name(temporary: bool) -> str:
+    return "temporary" if temporary else "permanent"
+
+
+def _persist_job_outcome(
+    repo_key: str,
+    namespace: str | None,
+    temporary: bool,
+    status: str,
+    error_kind: str | None = None,
+    expected_epoch: int | None = None,
+    *,
+    strict: bool = False,
+    kind: str | None = None,
+) -> None:
+    """Record the last job outcome durably (survives restart).
+
+    ``kind`` ("initial"/"refresh"/"backfill") lets the registry track refresh
+    health separately from the last job.
+
+    ``strict`` lets an ``IndexInvalidatedError`` (the index was deleted while
+    the job ran) propagate so the caller reports cancellation; failure paths
+    use best effort because they must not mask the original error.
+    """
+    try:
+        record_job_outcome(
+            repo_key,
+            namespace,
+            _storage_name(temporary),
+            status=status,
+            error_kind=error_kind,
+            finished_at=_now_iso(),
+            expected_epoch=expected_epoch,
+            kind=kind,
+        )
+    except IndexInvalidatedError:
+        if strict:
+            raise
+    except Exception as exc:  # pragma: no cover - best effort bookkeeping
+        if strict:
+            raise
+        print(f"[!] Could not persist job outcome for {repo_key}: {exc}", file=sys.stderr)
+
+
+def _safe_coverage(repo_key: str, namespace: str | None, temporary: bool) -> dict | None:
+    try:
+        coverage = compute_coverage(repo_key, namespace, _storage_name(temporary))
+    except Exception as exc:  # status text must never fail a finished job
+        print(f"[!] Could not compute coverage for {repo_key}: {exc}", file=sys.stderr)
+        return None
+    return coverage if isinstance(coverage, dict) else None
+
+
+def _pr_span(coverage: dict | None, prs: list[dict]) -> tuple[int | None, int | None, int | None]:
+    """(count, min, max) of indexed PR numbers; falls back to this fetch."""
+    if coverage and coverage.get("pull_requests_indexed"):
+        return (
+            coverage["pull_requests_indexed"],
+            coverage.get("pr_number_min"),
+            coverage.get("pr_number_max"),
+        )
+    numbers = [pr["number"] for pr in prs if isinstance(pr.get("number"), int)]
+    if not numbers:
+        return None, None, None
+    return len(numbers), min(numbers), max(numbers)
+
+
+def _history_message(
+    repo_key: str,
+    kind: str,
+    coverage: dict | None,
+    prs: list[dict],
+    history_complete: bool,
+) -> str:
+    """Human-readable result that never implies full history when it is not."""
+    count, low, high = _pr_span(coverage, prs)
+    span = f" (#{low}-#{high})" if low is not None and high is not None else ""
+    noun = "PR" if count == 1 else "PRs"
+    lead = f"{repo_key}: indexed {count if count is not None else 0} {noun}{span}"
+    if history_complete:
+        text = f"{lead}; the full closed pull request history is imported."
+    else:
+        text = (
+            f"{lead}; older history not imported. This is a bounded window, not "
+            "full repository history. Run ensure_repo_ready with backfill=true "
+            "to continue importing older pull requests (one chunk), or "
+            "backfill_all=true to import everything."
+        )
+    if kind == "backfill":
+        text = f"Backfilled {len(prs)} PRs. " + text
+    return text
+
+
+def _pages_consumed(pages: int, pr_count: int, complete: bool) -> int:
+    if not complete:
+        return pages
+    return max(1, min(pages, -(-pr_count // PAGE_SIZE)))
+
+
+def _persisted_cursor(fetched, complete: bool) -> str:
+    """Cursor to resume older history from ('' once history is complete)."""
+    if complete:
+        return ""
+    return getattr(fetched, "end_cursor", None) or getattr(fetched, "next_cursor", None) or ""
+
+
+MAX_PAGES_LIMIT = 200  # hard ceiling for backfill_all's total page budget
+
+
+def _truncated_connections(prs: list[dict]) -> list[str]:
+    return sorted({
+        connection
+        for pr in prs
+        for connection in (
+            pr.get("truncated_connections", [])
+            if isinstance(pr.get("truncated_connections", []), list)
+            else []
+        )
+        if isinstance(connection, str)
+    })
+
+
+def _backfill_all_message(
+    repo_key: str,
+    coverage: dict | None,
+    *,
+    complete: bool,
+    chunks: int,
+    pages_run: int,
+    prs_run: int,
+    max_pages: int,
+) -> str:
+    """Result text for an 'import all history' run (never implies more than it did)."""
+    if complete and prs_run == 0 and not (coverage and coverage.get("pull_requests_indexed")):
+        return f"No closed pull requests were found for {repo_key}; nothing was indexed."
+    count, low, high = _pr_span(coverage, [])
+    span = f" (#{low}-#{high})" if low is not None and high is not None else ""
+    noun = "PR" if count == 1 else "PRs"
+    lead = f"{repo_key}: indexed {count if count is not None else 0} {noun}{span}"
+    ran = f"{prs_run} imported by this run over {pages_run} page(s) in {chunks} chunk(s)"
+    if complete:
+        return f"{lead}; the full closed pull request history is imported ({ran})."
+    return (
+        f"{lead}; the page cap (max_pages={max_pages}) was reached after {ran}, "
+        "and older history remains. Call again with backfill_all=true to continue "
+        "from the saved cursor."
+    )
+
+
+def _describe_for_message(repo_key: str, namespace: str | None, temporary: bool) -> str:
+    """Index status lines for short-circuit responses (never raises)."""
+    try:
+        return "\n" + format_index_status(
+            describe_index_state(repo_key, namespace, _storage_name(temporary))
+        )
+    except Exception as exc:
+        print(f"[!] Could not describe index state for {repo_key}: {exc}", file=sys.stderr)
+        return ""
+
+
 def register_indexing_tools(mcp):
     @mcp.tool(name="ensure_repo_ready")
     async def ensure_repo_ready(
@@ -138,9 +316,25 @@ def register_indexing_tools(mcp):
         pages: int = 2,
         refresh: bool = False,
         namespace: str | None = None,
+        backfill: bool = False,
+        backfill_all: bool = False,
+        max_pages: int = 50,
         ctx: Context | None = None,
     ) -> str:
-        """Index a repository or refresh its GitHub PR evidence asynchronously."""
+        """Index a repository, refresh it, or continue importing older history.
+
+        The first import fetches the newest `pages` pages of closed PRs ordered
+        by creation date (a bounded window, not full history). `refresh=true`
+        pulls PRs updated since the last refresh. `backfill=true` continues
+        older history from the persisted cursor for `pages` pages and works
+        after a restart. `backfill_all=true` imports all history as one
+        background job (the initial window first if nothing is indexed, then
+        chunks of `pages` pages from the saved cursor) until history is
+        complete or `max_pages` total pages (clamped to 1-200) were fetched;
+        every chunk is published, so progress survives a crash or restart and a
+        capped run is continued by calling again with `backfill_all=true`.
+        It cannot be combined with `refresh` or `backfill`.
+        """
         if ctx is None:
             raise ValueError("Context is required")
 
@@ -159,6 +353,20 @@ def register_indexing_tools(mcp):
             raise ValueError("pages must be between 1 and 10.")
         if storage not in {None, "temporary", "permanent"}:
             raise ValueError("storage must be one of: temporary, permanent")
+        if refresh and backfill:
+            raise ValueError(
+                "refresh and backfill are separate operations; call ensure_repo_ready "
+                "with only one of them."
+            )
+        if backfill_all and (refresh or backfill):
+            raise ValueError(
+                "backfill_all cannot be combined with refresh or backfill; "
+                "backfill_all already continues older history in chunks. Call "
+                "ensure_repo_ready with only one of them."
+            )
+        # Hard clamp, not an error: the page budget is always 1..MAX_PAGES_LIMIT.
+        max_pages = max(1, min(MAX_PAGES_LIMIT, int(max_pages)))
+        history_import = backfill or backfill_all
 
         permanently_indexed = await asyncio.to_thread(
             repo_is_indexed_permanently, repo_key, namespace=namespace
@@ -167,33 +375,37 @@ def register_indexing_tools(mcp):
             repo_is_indexed_temporarily, repo_key, namespace=namespace
         )
 
-        if permanently_indexed and not refresh and storage in {None, "permanent"}:
+        if permanently_indexed and not refresh and not history_import and storage in {None, "permanent"}:
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "permanent"
             stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=False, namespace=namespace)
+            status_text = await asyncio.to_thread(_describe_for_message, repo_key, namespace, False)
             return (
                 f"{repo_key} is already indexed permanently on disk.\n"
                 f"{stats['total_documents']} documents loaded and ready.\n"
                 f"Active repo set to {repo_key}."
+                f"{status_text}"
                 f"{namespace_text(namespace)}"
             )
 
-        if temporarily_indexed and not refresh and storage in {None, "temporary"}:
+        if temporarily_indexed and not refresh and not history_import and storage in {None, "temporary"}:
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "temporary"
             stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=True, namespace=namespace)
+            status_text = await asyncio.to_thread(_describe_for_message, repo_key, namespace, True)
             return (
                 f"{repo_key} is already indexed in memory.\n"
                 f"{stats['total_documents']} documents loaded and ready.\n"
                 f"Active repo set to {repo_key}."
+                f"{status_text}"
                 f"{namespace_text(namespace)}"
             )
 
-        # A refresh inherits the existing storage choice. First indexing still
-        # asks the caller to make the persistence decision explicitly.
-        if refresh and storage is None:
+        # A refresh or backfill inherits the existing storage choice. First
+        # indexing still asks the caller to make the persistence decision.
+        if (refresh or history_import) and storage is None:
             if permanently_indexed:
                 storage = "permanent"
             elif temporarily_indexed:
@@ -205,8 +417,39 @@ def register_indexing_tools(mcp):
                 f"{namespace_text(namespace)}\n\n"
                 f"How would you like to store it?\n\n"
                 f"{STORAGE_CONSEQUENCES}\n"
-                f"Reply with permanent or temporary and I will fetch/index up to {pages * 30} PRs."
+                f"Reply with permanent or temporary and I will fetch/index up to {pages * 30} PRs "
+                f"(the newest by creation date; older history can be added later with backfill=true, "
+                f"or all of it with backfill_all=true)."
             )
+
+        temporary = storage == "temporary"
+        target_was_indexed = temporarily_indexed if temporary else permanently_indexed
+
+        if backfill and not target_was_indexed:
+                return (
+                f"{repo_key} is not indexed in {storage} storage, so there is no "
+                "history to continue. Run ensure_repo_ready first to import the "
+                f"initial window.{namespace_text(namespace)}"
+            )
+        if history_import and target_was_indexed:
+            registry = await asyncio.to_thread(
+                get_index_registry, repo_key, namespace, _storage_name(temporary)
+            )
+            if registry.get("history_complete") is True and not registry.get("backfill_cursor"):
+                coverage = await asyncio.to_thread(_safe_coverage, repo_key, namespace, temporary)
+                summary = f"\nCoverage: {coverage['summary']}" if coverage else ""
+                return (
+                    f"Nothing to backfill: the full closed pull request history of "
+                    f"{repo_key} is already indexed.{summary}{namespace_text(namespace)}"
+                )
+
+        if backfill or (backfill_all and target_was_indexed):
+            kind = "backfill"
+        elif refresh and target_was_indexed:
+            kind = "refresh"
+        else:
+            kind = "initial"
+        job_key = _job_key(repo_key, namespace, temporary)
 
         # Resolve the credential before claiming a background job. The job then
         # owns only a short-lived local value, never a request context or a
@@ -214,10 +457,47 @@ def register_indexing_tools(mcp):
         try:
             github_token = await get_github_access_token()
         except GitHubAuthorizationError as exc:
-            return f"GitHub connection is required before indexing. {exc}"
+            details = error_details(exc)
+            now = _now_iso()
+            recorded, existing_job = _record_failed_job_if_idle(
+                job_key,
+                {
+                    "status": "failed",
+                    "kind": kind,
+                    "repo": repo_key,
+                    "namespace": namespace,
+                    "storage": storage,
+                    "temporary": temporary,
+                    "refresh": refresh,
+                    "backfill": backfill,
+                    "backfill_all": backfill_all,
+                    "started_at": now,
+                    "finished_at": now,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "message": None,
+                    **details,
+                },
+            )
+            if not recorded:
+                # Another job owns this scope: leave its record and the durable
+                # outcome alone; this call changes nothing.
+                return (
+                    f"Indexing is already {existing_job['status']} for {repo_key} "
+                    f"[{storage}]. Use get_index_stats to monitor it. (This call "
+                    "could not obtain a GitHub credential and made no change.)"
+                    f"{namespace_text(namespace)}"
+                )
+            await asyncio.to_thread(
+                _persist_job_outcome, repo_key, namespace, temporary, "failed",
+                details["error_kind"], kind=kind,
+            )
+            return (
+                f"GitHub connection is required before indexing. {exc}\n"
+                f"error_kind: {details['error_kind']}\n"
+                f"Action: {details['action']}"
+                f"{namespace_text(namespace)}"
+            )
 
-        temporary = storage == "temporary"
-        target_was_indexed = temporarily_indexed if temporary else permanently_indexed
         # Capture the write epoch before claiming the job. A concurrent delete
         # after this point invalidates the captured epoch, so this job cannot
         # recreate an index the user explicitly removed.
@@ -227,21 +507,31 @@ def register_indexing_tools(mcp):
             temporary=temporary,
             namespace=namespace,
         )
-        job_key = _job_key(repo_key, namespace, temporary)
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = _now_iso()
         job = {
             "status": "queued",
+            "kind": kind,
             "repo": repo_key,
             "namespace": namespace,
             "storage": storage,
             "temporary": temporary,
             "refresh": refresh,
+            "backfill": backfill,
+            "backfill_all": backfill_all,
+            "pages": pages,
+            "max_pages": max_pages if backfill_all else None,
+            "pages_done": 0 if backfill_all else None,
+            "prs_indexed": 0 if backfill_all else None,
             "started_at": started_at,
             "finished_at": None,
             "documents_indexed": None,
             "truncated_connections": [],
             "error": None,
+            "error_kind": None,
+            "action": None,
             "message": None,
+            "history_complete": None,
+            "older_history_remaining": None,
             "expected_epoch": expected_epoch,
         }
         claimed, existing_job = _claim_index_job(job_key, job)
@@ -252,29 +542,246 @@ def register_indexing_tools(mcp):
                 f"{namespace_text(namespace)}"
             )
 
+        # The phase currently running: a backfill_all job starts as "initial" when
+        # nothing is indexed and switches to "backfill", so a failure is recorded
+        # against the phase that actually failed.
+        run_kind = kind
+
+        async def _finish(
+            status: str,
+            *,
+            count: int,
+            message: str,
+            history_complete: bool | None = None,
+            truncated_connections: list[str] | None = None,
+            action: str | None = None,
+        ) -> None:
+            """Persist the outcome (epoch protected), then publish the job result."""
+            await asyncio.to_thread(
+                _persist_job_outcome, repo_key, namespace, temporary, status, None,
+                expected_epoch, strict=True, kind=run_kind,
+            )
+            with _INDEX_JOBS_LOCK:
+                cancelled = (_INDEX_JOBS.get(job_key) or {}).get("status") == "cancelled"
+            if cancelled:  # deleted while running: never overwrite the cancellation
+                return
+            _set_index_job(
+                job_key,
+                status=status,
+                documents_indexed=count,
+                truncated_connections=truncated_connections or [],
+                message=message,
+                action=action,
+                history_complete=history_complete,
+                older_history_remaining=(
+                    None if history_complete is None else not history_complete
+                ),
+                finished_at=_now_iso(),
+            )
+
+        def _activate() -> None:
+            state["active_repo"] = repo_key
+            state["active_namespace"] = namespace
+            state["storage_types"][state_key] = storage
+
+        async def _publish_chunk(chunk_kind, fetched, prs, fetch_complete, chunk_pages):
+            """Index one fetched chunk, then persist its resume point.
+
+            Returns (documents indexed, pages consumed).  The cursor is saved only
+            after the generation is published, so a failure keeps the last good one.
+            """
+            count = 0
+            if prs:
+                count = await asyncio.to_thread(
+                    index_prs,
+                    repo_key,
+                    prs,
+                    temporary=temporary,
+                    namespace=namespace,
+                    # An initial window establishes the refresh watermark;
+                    # a backfill must never move it.
+                    advance_watermark=(chunk_kind == "initial"),
+                    expected_epoch=expected_epoch,
+                    is_refresh=False,
+                )
+            elif chunk_kind == "initial":
+                # Only the initial import syncs with GitHub's newest
+                # state; an empty backfill says nothing about freshness
+                # and must not reset the stale clock.
+                await asyncio.to_thread(
+                    mark_repo_checked,
+                    repo_key,
+                    temporary=temporary,
+                    namespace=namespace,
+                    expected_epoch=expected_epoch,
+                )
+            # Persist the resume point only after the generation is
+            # published: a failure above keeps the last good cursor.
+            cursor_to_save = _persisted_cursor(fetched, fetch_complete)
+            backfill_fields: dict = {
+                "backfill_cursor": cursor_to_save,
+                "history_complete": True if fetch_complete else False,
+                "expected_epoch": expected_epoch,
+            }
+            pages_used = _pages_consumed(chunk_pages, len(prs), fetch_complete)
+            if chunk_kind == "initial":
+                backfill_fields["pages_done"] = pages_used
+            else:
+                backfill_fields["add_pages"] = pages_used
+            if prs or fetch_complete:
+                await asyncio.to_thread(
+                    set_backfill_state,
+                    repo_key,
+                    namespace,
+                    _storage_name(temporary),
+                    **backfill_fields,
+                )
+            return count, pages_used
+
+        def _job_cancelled() -> bool:
+            with _INDEX_JOBS_LOCK:
+                return (_INDEX_JOBS.get(job_key) or {}).get("status") == "cancelled"
+
+        async def _run_backfill_all():
+            """Loop the backfill step until history is complete or max_pages is spent.
+
+            Every chunk is a normal initial/backfill step: it publishes its own
+            generation and persists its cursor, so a crash, failure or restart
+            keeps everything published so far and the next call resumes from the
+            saved cursor.  Writes are epoch protected like any other job, so a
+            delete while running cancels the loop and nothing is resurrected.
+            """
+            nonlocal run_kind
+            pages_run = prs_run = docs_run = chunks = 0
+            truncated: set[str] = set()
+            complete = False
+            while True:
+                if _job_cancelled():
+                    return
+                run_kind = "backfill" if (chunks or target_was_indexed) else "initial"
+                after_cursor = None
+                if run_kind == "backfill":
+                    registry = await asyncio.to_thread(
+                        get_index_registry, repo_key, namespace, _storage_name(temporary)
+                    )
+                    after_cursor = registry.get("backfill_cursor") or None
+                chunk_pages = min(pages, max_pages - pages_run)
+                _set_index_job(job_key, kind=run_kind)
+                print(
+                    f"[*] Import-all chunk {chunks + 1} for {repo_key} ({run_kind}, "
+                    f"{chunk_pages} page(s), {pages_run}/{max_pages} pages used)...",
+                    file=sys.stderr,
+                )
+                fetched = await fetch_prs(
+                    *repo_key.split("/", 1),
+                    pages=chunk_pages,
+                    github_token=github_token,
+                    since_updated_at=None,
+                    after_cursor=after_cursor,
+                    return_result=True,
+                    order_by="CREATED_AT",
+                )
+                if isinstance(fetched, list):  # Compatibility with in-process extensions/tests.
+                    prs, fetch_complete = fetched, True
+                else:
+                    prs, fetch_complete = fetched.prs, bool(fetched.complete)
+                if not prs and not fetch_complete:
+                    # Without progress the loop could never end; stop loudly and
+                    # keep what is already published.
+                    raise RuntimeError(
+                        "GitHub returned an empty page without completing the history; "
+                        "stopping the import."
+                    )
+                count, pages_used = await _publish_chunk(
+                    run_kind, fetched, prs, fetch_complete, chunk_pages
+                )
+                chunks += 1
+                pages_run += pages_used
+                prs_run += len(prs)
+                docs_run += count
+                truncated.update(_truncated_connections(prs))
+                complete = fetch_complete
+                _activate()
+                if _job_cancelled():  # deleted meanwhile: never overwrite the cancellation
+                    return
+                _set_index_job(
+                    job_key,
+                    pages_done=pages_run,
+                    prs_indexed=prs_run,
+                    documents_indexed=docs_run,
+                    history_complete=complete,
+                    older_history_remaining=not complete,
+                    message=(
+                        f"Importing history: {pages_run}/{max_pages} pages, "
+                        f"{prs_run} PRs indexed so far (chunk {chunks})."
+                    ),
+                )
+                if complete or pages_run >= max_pages:
+                    break
+
+            coverage = await asyncio.to_thread(_safe_coverage, repo_key, namespace, temporary)
+            message = _backfill_all_message(
+                repo_key,
+                coverage,
+                complete=complete,
+                chunks=chunks,
+                pages_run=pages_run,
+                prs_run=prs_run,
+                max_pages=max_pages,
+            )
+            await _finish(
+                "ready" if complete else "partial",
+                count=docs_run,
+                message=message,
+                history_complete=complete,
+                truncated_connections=sorted(truncated),
+                action=None if complete else BACKFILL_ALL_CONTINUE_ACTION,
+            )
+            print(f"[+] {message}", file=sys.stderr)
+
         async def _run_indexing():
             try:
                 _set_index_job(job_key, status="running")
+                if backfill_all:
+                    await _run_backfill_all()
+                    return
                 refresh_state = await asyncio.to_thread(
                     get_refresh_state,
                     repo_key,
                     namespace=namespace,
                     temporary=temporary,
                 )
-                since_updated_at = (
-                    refresh_state["last_updated_at"] if target_was_indexed else None
-                )
-                is_incremental_refresh = refresh and since_updated_at is not None
-                after_cursor = (
-                    refresh_state["refresh_cursor"] if since_updated_at else None
-                )
-                msg = (
-                    f"incremental update since {since_updated_at}"
-                    if since_updated_at
-                    else "full index"
-                )
-                if after_cursor:
-                    msg += " (resuming a capped refresh)"
+                fetch_kwargs: dict = {}
+                since_updated_at = None
+                after_cursor = None
+                is_incremental_refresh = False
+                if kind == "backfill":
+                    registry = await asyncio.to_thread(
+                        get_index_registry, repo_key, namespace, _storage_name(temporary)
+                    )
+                    after_cursor = registry.get("backfill_cursor") or None
+                    fetch_kwargs["order_by"] = "CREATED_AT"
+                    msg = (
+                        "older-history backfill resuming from the saved cursor"
+                        if after_cursor
+                        else "older-history backfill from the newest created PR (no saved cursor)"
+                    )
+                elif kind == "refresh":
+                    since_updated_at = refresh_state["last_updated_at"]
+                    is_incremental_refresh = since_updated_at is not None
+                    after_cursor = (
+                        refresh_state["refresh_cursor"] if since_updated_at else None
+                    )
+                    msg = (
+                        f"incremental update since {since_updated_at}"
+                        if since_updated_at
+                        else "full refresh (no watermark yet)"
+                    )
+                    if after_cursor:
+                        msg += " (resuming a capped refresh)"
+                else:
+                    fetch_kwargs["order_by"] = "CREATED_AT"
+                    msg = "initial import (newest created PRs first)"
                 print(f"[*] Starting background indexing for {repo_key} ({msg})...", file=sys.stderr)
 
                 fetched = await fetch_prs(
@@ -284,6 +791,7 @@ def register_indexing_tools(mcp):
                     since_updated_at=since_updated_at,
                     after_cursor=after_cursor,
                     return_result=True,
+                    **fetch_kwargs,
                 )
                 if isinstance(fetched, list):  # Compatibility with in-process extensions/tests.
                     prs = fetched
@@ -298,6 +806,44 @@ def register_indexing_tools(mcp):
                         "GitHub returned a capped refresh without a continuation cursor."
                     )
 
+                truncated_connections = _truncated_connections(prs)
+
+                # ── Older-history import: initial window or backfill ──────────
+                if kind in {"initial", "backfill"}:
+                    count, _ = await _publish_chunk(
+                        kind, fetched, prs, fetch_complete, pages
+                    )
+                    _activate()
+                    coverage = await asyncio.to_thread(
+                        _safe_coverage, repo_key, namespace, temporary
+                    )
+                    if not prs:
+                        message = (
+                            f"No closed pull requests were found for {repo_key}; "
+                            "nothing was indexed."
+                            if kind == "initial"
+                            else f"Backfill found no older pull requests for {repo_key}; "
+                            "history is complete."
+                        )
+                    else:
+                        message = _history_message(
+                            repo_key, kind, coverage, prs, bool(fetch_complete)
+                        )
+                    # A backfill that stopped on the pages cap leaves a requested
+                    # selection unfinished (ready_partial); an initial window is
+                    # exactly what was requested (ready_selected_scope).
+                    status = "partial" if kind == "backfill" and not fetch_complete else "ready"
+                    await _finish(
+                        status,
+                        count=count,
+                        message=message,
+                        history_complete=bool(fetch_complete),
+                        truncated_connections=truncated_connections,
+                    )
+                    print(f"[+] {message}", file=sys.stderr)
+                    return
+
+                # ── Incremental refresh (existing semantics) ──────────────────
                 updated_at_values = [
                     value
                     for pr in prs
@@ -340,28 +886,18 @@ def register_indexing_tools(mcp):
                             high_watermark=high_watermark,
                             expected_epoch=expected_epoch,
                         )
-                        _set_index_job(
-                            job_key,
-                            status="partial",
-                            documents_indexed=0,
+                        await _finish(
+                            "partial",
+                            count=0,
                             message=(
                                 "Refresh reached the page cap. Run ensure_repo_ready "
                                 "with refresh=true again to continue."
                             ),
-                            finished_at=datetime.now(timezone.utc).isoformat(),
                         )
                         return
                     print(f"[+] No new PRs found for {repo_key}. Already up to date.", file=sys.stderr)
-                    state["active_repo"] = repo_key
-                    state["active_namespace"] = namespace
-                    state["storage_types"][state_key] = storage
-                    _set_index_job(
-                        job_key,
-                        status="ready",
-                        documents_indexed=0,
-                        truncated_connections=[],
-                        finished_at=datetime.now(timezone.utc).isoformat(),
-                    )
+                    _activate()
+                    await _finish("ready", count=0, message="Already up to date; no new pull requests.")
                     return
 
                 count = await asyncio.to_thread(
@@ -372,6 +908,7 @@ def register_indexing_tools(mcp):
                     namespace=namespace,
                     advance_watermark=not (is_incremental_refresh and not fetch_complete),
                     expected_epoch=expected_epoch,
+                    is_refresh=True,
                 )
                 if is_incremental_refresh and not fetch_complete:
                     await asyncio.to_thread(
@@ -383,16 +920,13 @@ def register_indexing_tools(mcp):
                         high_watermark=high_watermark,
                         expected_epoch=expected_epoch,
                     )
-                    _set_index_job(
-                        job_key,
-                        status="partial",
-                        documents_indexed=count,
-                        truncated_connections=[],
+                    await _finish(
+                        "partial",
+                        count=count,
                         message=(
                             "Refresh reached the page cap. Run ensure_repo_ready "
                             "with refresh=true again to continue."
                         ),
-                        finished_at=datetime.now(timezone.utc).isoformat(),
                     )
                     print(
                         f"[*] Refresh paused for {repo_key}; continuation is required before its watermark advances.",
@@ -418,25 +952,12 @@ def register_indexing_tools(mcp):
                         high_watermark=high_watermark,
                         expected_epoch=expected_epoch,
                     )
-                state["active_repo"] = repo_key
-                state["active_namespace"] = namespace
-                state["storage_types"][state_key] = storage
-                truncated_connections = sorted({
-                    connection
-                    for pr in prs
-                    for connection in (
-                        pr.get("truncated_connections", [])
-                        if isinstance(pr.get("truncated_connections", []), list)
-                        else []
-                    )
-                    if isinstance(connection, str)
-                })
-                _set_index_job(
-                    job_key,
-                    status="ready",
-                    documents_indexed=count,
+                _activate()
+                await _finish(
+                    "ready",
+                    count=count,
+                    message=f"Refreshed {repo_key}: {len(prs)} pull requests re-indexed.",
                     truncated_connections=truncated_connections,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
                 )
                 print(f"[+] Background indexing finished for {repo_key}. {count} docs parsed.", file=sys.stderr)
             except IndexInvalidatedError:
@@ -444,16 +965,24 @@ def register_indexing_tools(mcp):
                     job_key,
                     status="cancelled",
                     error="Indexing was cancelled because this index was deleted.",
-                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    finished_at=_now_iso(),
                 )
                 print(f"[*] Background indexing cancelled for {repo_key} after deletion.", file=sys.stderr)
             except Exception as e:
                 error = f"{type(e).__name__}: {e}"
+                details = error_details(e)
+                # Visible first; then durable so the failure survives a restart.
+                # Any generation published by an earlier job keeps serving.
                 _set_index_job(
                     job_key,
                     status="failed",
                     error=error,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    finished_at=_now_iso(),
+                    **details,
+                )
+                await asyncio.to_thread(
+                    _persist_job_outcome, repo_key, namespace, temporary, "failed",
+                    details["error_kind"], expected_epoch, kind=run_kind,
                 )
                 print(f"[!] Background indexing failed for {repo_key}: {error}", file=sys.stderr)
 
@@ -461,10 +990,31 @@ def register_indexing_tools(mcp):
         _retain_index_task(job_key, task)
 
         storage_label = "temporary (in-memory)" if temporary else "permanent (disk)"
-        action = "Refresh" if refresh else "Background indexing"
+        if backfill_all:
+            action = "Import of all history"
+        elif kind == "backfill":
+            action = "Backfill of older history"
+        elif kind == "refresh":
+            action = "Refresh"
+        else:
+            action = "Background indexing"
+        scope_note = ""
+        if backfill_all:
+            scope_note = (
+                f"\nThis runs as one job: {pages}-page chunks (each published as its own "
+                f"generation) until history is complete or {max_pages} pages in total were "
+                "fetched; progress (pages_done, prs_indexed, history_complete) is in "
+                "get_index_stats. If the cap is hit, call again with backfill_all=true."
+            )
+        elif kind == "initial":
+            scope_note = (
+                f"\nThis imports the newest {pages * PAGE_SIZE} closed PRs by creation date "
+                "(a bounded window); use backfill=true or backfill_all=true later for older history."
+            )
         return (
             f"{action} started for {repo_key} [{storage_label}].\n"
-            f"Use the 'get_index_stats' tool to verify its status, document count, and any error.\n"
+            f"Use the 'get_index_stats' tool to verify its status, document count, and any error."
+            f"{scope_note}\n"
             f"Active repo will be activated upon completion."
             f"{namespace_text(namespace)}"
         )
@@ -593,5 +1143,17 @@ def register_indexing_tools(mcp):
             temporary = bool(job.get("temporary"))
 
         stats = await asyncio.to_thread(get_collection_stats, repo_key, temporary=temporary, namespace=namespace)
+        description = await asyncio.to_thread(
+            describe_index_state, repo_key, namespace, _storage_name(temporary)
+        )
         stats["index_job"] = job
+        stats["index_state"] = description["index_state"]
+        stats["stale_reason"] = description["stale_reason"]
+        stats["coverage"] = description["coverage"]
+        stats["generation"] = description["generation"]
+        stats["serving_generation"] = description["serving_generation"]
+        stats["last_job"] = description["last_job"]
+        stats["action"] = description["action"]
+        job_message = (job or {}).get("message") if job and job.get("temporary") == temporary else None
+        stats["message"] = job_message or description["coverage"].get("summary")
         return json.dumps(stats, indent=2)

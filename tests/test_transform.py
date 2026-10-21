@@ -59,3 +59,116 @@ def test_flatten_pr_bot_detection():
     assert flattened["author_is_bot"] is True
     assert flattened["review_comments"][0]["is_bot"] is True
     assert flattened["touches_ci"] is False
+
+
+def _thread_pr():
+    return {
+        "id": "PR_1",
+        "number": 200,
+        "url": "https://github.com/acme/widget/pull/200",
+        "title": "T",
+        "body": "B",
+        "author": {"__typename": "User", "login": "alice"},
+        "createdAt": "2024-05-01T10:00:00Z",
+        "updatedAt": "2024-05-02T10:00:00Z",
+        "files": {"nodes": []},
+        "reviewThreads": {"nodes": [{
+            "id": "T1", "isResolved": True, "isOutdated": True,
+            "path": "src/a.py", "line": None, "originalLine": 7,
+            "comments": {
+                "totalCount": 2,
+                "pageInfo": {"hasNextPage": False, "endCursor": "c"},
+                "nodes": [
+                    {"id": "C1", "databaseId": 11, "url": "https://x/c1",
+                     "author": {"__typename": "Bot", "login": "copilot-pull-request-reviewer"},
+                     "body": "bot says", "createdAt": "2024-05-01T10:01:00Z",
+                     "updatedAt": "2024-05-01T10:02:00Z", "diffHunk": "@@ h @@",
+                     "originalCommit": {"oid": "abc123"}},
+                    {"id": "C2", "databaseId": 12, "url": "https://x/c2",
+                     "author": {"__typename": "User", "login": "bob"},
+                     "body": "human reply", "createdAt": "2024-05-01T10:03:00Z",
+                     "updatedAt": "2024-05-01T10:03:00Z", "diffHunk": ""},
+                ],
+            },
+        }]},
+        "commits": {"nodes": [
+            {"commit": {"oid": "o1", "message": "m", "url": "https://x/commit/o1",
+                        "author": {"name": "A", "user": {"login": "alice"}}}},
+            {"commit": {"oid": "o2", "message": "m2", "url": "https://x/commit/o2",
+                        "author": {"name": "Anon", "user": None}}},
+        ]},
+        "reviews": {"nodes": [
+            {"id": "R1", "url": "https://x/r1", "author": {"__typename": "Bot", "login": "ci"},
+             "state": "COMMENTED", "body": "b", "submittedAt": "2024-05-01T10:05:00Z",
+             "updatedAt": "2024-05-01T10:06:00Z"},
+            {"id": "R2", "url": "https://x/r2", "author": None,
+             "state": "APPROVED", "body": "", "submittedAt": "2024-05-01T10:07:00Z"},
+        ]},
+    }
+
+
+def test_flatten_pr_keeps_urls_and_author_types():
+    pr = flatten_pr(_thread_pr(), observed_at="2024-06-01T00:00:00Z")
+
+    assert pr["url"] == "https://github.com/acme/widget/pull/200"
+    assert pr["author_type"] == "human" and pr["is_bot"] is False
+    assert pr["observed_at"] == "2024-06-01T00:00:00Z"
+    assert pr["nested_incomplete_threads"] == 0
+
+    assert [c["url"] for c in pr["commits"]] == ["https://x/commit/o1", "https://x/commit/o2"]
+    assert [c["author"] for c in pr["commits"]] == ["alice", ""]
+
+    bot_review, ghost_review = pr["reviews"]
+    assert bot_review["url"] == "https://x/r1" and bot_review["updated_at"] == "2024-05-01T10:06:00Z"
+    assert (bot_review["author_type"], bot_review["is_bot"]) == ("bot", True)
+    assert (ghost_review["author"], ghost_review["author_type"], ghost_review["is_bot"]) == (
+        "ghost", "unknown", False)
+
+
+def test_flatten_pr_thread_record_distinguishes_bot_and_human_comments():
+    pr = flatten_pr(_thread_pr())
+    (thread,) = pr["threads"]
+
+    assert thread["thread_id"] == "T1"
+    assert thread["url"] == "https://x/c1"
+    assert thread["path"] == "src/a.py"
+    assert thread["line"] is None and thread["original_line"] == 7
+    assert thread["original_commit"] == "abc123"
+    assert thread["is_resolved"] is True and thread["is_outdated"] is True
+    assert (thread["comments_fetched"], thread["comments_total"]) == (2, 2)
+    assert thread["thread_incomplete"] is False
+
+    bot, human = thread["comments"]
+    # a login with no "bot" markers is still a bot when GitHub says __typename is Bot
+    assert (bot["author_type"], bot["is_bot"]) == ("bot", True)
+    assert (human["author_type"], human["is_bot"]) == ("human", False)
+    assert bot["database_id"] == 11 and bot["url"] == "https://x/c1"
+    assert bot["updated_at"] == "2024-05-01T10:02:00Z"
+    assert human["diff_hunk"] == "@@ h @@"  # reply inherits the thread hunk
+
+    # legacy flat comments are preserved
+    assert [c["author"] for c in pr["review_comments"]] == [
+        "copilot-pull-request-reviewer", "bob"]
+
+
+def test_flatten_pr_null_author_is_ghost_unknown_and_heuristic_still_applies():
+    raw = _thread_pr()
+    raw["author"] = None
+    pr = flatten_pr(raw)
+    assert (pr["author"], pr["author_type"], pr["is_bot"], pr["author_is_bot"]) == (
+        "ghost", "unknown", False, False)
+
+    raw["author"] = {"login": "dependabot[bot]"}  # no __typename: heuristic
+    pr = flatten_pr(raw)
+    assert (pr["author_type"], pr["is_bot"], pr["author_is_bot"]) == ("bot", True, True)
+
+
+def test_flatten_pr_counts_incomplete_threads():
+    raw = _thread_pr()
+    raw["reviewThreads"]["nodes"][0]["comments"]["pageInfo"] = {"hasNextPage": True}
+    raw["reviewThreads"]["nodes"][0]["comments"]["totalCount"] = 60
+    pr = flatten_pr(raw)
+    assert pr["threads"][0]["thread_incomplete"] is True
+    assert pr["threads"][0]["comments_total"] == 60
+    assert pr["nested_incomplete_threads"] == 1
+    assert "reviewThreads.comments" in pr["truncated_connections"]
