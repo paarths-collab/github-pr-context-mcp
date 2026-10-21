@@ -5,7 +5,7 @@
 ![Version](https://img.shields.io/badge/version-0.3.3-green)
 [![Downloads](https://static.pepy.tech/personalized-badge/github-pr-context-mcp?period=total&units=international_system&left_color=grey&right_color=blue&left_text=downloads)](https://pepy.tech/project/github-pr-context-mcp)
 
-**This MCP retrieves evidence. Your IDE agent decides what it means.**
+**Find the dated review evidence behind the code.** This MCP retrieves it; your IDE agent decides what it means.
 
 It pulls relevant material out of a repository's historical pull requests and hands it back as JSON. Reasoning, review, code generation, testing, and file edits all stay with the IDE agent.
 
