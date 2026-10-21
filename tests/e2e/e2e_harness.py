@@ -12,6 +12,7 @@ Nothing here edits product code. Everything GitHub-shaped is invented fixture da
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 import json
 import os
@@ -23,6 +24,14 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+
+# BaseExceptionGroup is builtin from Python 3.11; anyio uses the exceptiongroup backport before that.
+_EXCEPTION_GROUP = getattr(builtins, "BaseExceptionGroup", None)
+if _EXCEPTION_GROUP is None:  # pragma: no cover - Python 3.10
+    try:
+        from exceptiongroup import BaseExceptionGroup as _EXCEPTION_GROUP
+    except ImportError:
+        _EXCEPTION_GROUP = ()
 
 E2E_DIR = Path(__file__).resolve().parent
 ROOT = E2E_DIR.parents[1]
@@ -658,9 +667,9 @@ def run_all(workdir: Path, rec: Recorder, installed: dict | None = None) -> dict
     started = time.monotonic()
     try:
         asyncio.run(run_flow(info, sb, rec))
-    except BaseExceptionGroup as group:  # anyio task groups wrap the real failure
+    except _EXCEPTION_GROUP as group:  # anyio task groups wrap the real failure
         leaf = group
-        while isinstance(leaf, BaseExceptionGroup):
+        while _EXCEPTION_GROUP and isinstance(leaf, _EXCEPTION_GROUP):
             leaf = leaf.exceptions[0]
         raise leaf from None
     rec.timings["flow_secs"] = round(time.monotonic() - started, 2)
