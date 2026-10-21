@@ -714,3 +714,53 @@ def test_index_checked_over_thirty_days_ago_is_stale(env):
     assert "days ago" in described["stale_reason"]
     assert "refresh=true" in described["action"]
     assert described["serving_generation"] == 1
+
+
+# ── import-all-history hooks (full coverage lives in test_backfill_all.py) ────
+
+def test_bounded_window_messages_point_to_backfill_and_backfill_all(env):
+    env.script = [_result([_pr(12), _pr(11)], complete=False, end_cursor="cursor-2")]
+
+    async def scenario():
+        started = await env.ensure(storage="permanent", pages=1)
+        return started, await env.stats()
+
+    started, stats = run(scenario())
+    assert "backfill=true or backfill_all=true" in started
+    message = stats["index_job"]["message"]
+    assert "bounded window" in message
+    assert "backfill=true" in message and "backfill_all=true" in message
+
+
+def test_backfill_all_is_rejected_with_refresh_or_backfill_before_any_work(env):
+    async def scenario():
+        for other in ("refresh", "backfill"):
+            with pytest.raises(ValueError, match="backfill_all cannot be combined"):
+                await env.ensure(storage="permanent", backfill_all=True, **{other: True})
+        # The pre-existing combination is still rejected with its own message.
+        with pytest.raises(ValueError, match="refresh and backfill"):
+            await env.ensure(storage="permanent", refresh=True, backfill=True)
+
+    run(scenario())
+    assert env.fetch_calls == []
+
+
+def test_registry_sourced_partial_state_offers_both_backfill_forms(env):
+    env.script = [_result([_pr(12), _pr(11)], complete=False, end_cursor="c")]
+
+    async def scenario():
+        await env.ensure(storage="permanent", pages=1)
+        env.script = [_result([_pr(10)], complete=False, end_cursor="c2")]
+        await env.ensure(backfill=True, pages=1)
+
+    run(scenario())
+    env.restart()  # only the durable registry remains
+    described = index_status.describe_index_state(env.repo, None, "permanent")
+    assert described["index_state"] == "ready_partial"
+    assert described["last_job"]["source"] == "registry"
+    assert "backfill=true" in described["action"] and "backfill_all=true" in described["action"]
+
+
+def test_job_progress_fields_are_part_of_the_public_job_summary():
+    for key in ("backfill_all", "max_pages", "pages_done", "prs_indexed"):
+        assert key in index_status._PUBLIC_JOB_KEYS

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from mcp.server.fastmcp import Context
 from auth import GitHubAuthorizationError
 from app.index_status import (
+    BACKFILL_ALL_CONTINUE_ACTION,
     _INDEX_JOBS,
     _INDEX_JOBS_LOCK,
     describe_index_state,
@@ -232,7 +233,8 @@ def _history_message(
         text = (
             f"{lead}; older history not imported. This is a bounded window, not "
             "full repository history. Run ensure_repo_ready with backfill=true "
-            "to continue importing older pull requests."
+            "to continue importing older pull requests (one chunk), or "
+            "backfill_all=true to import everything."
         )
     if kind == "backfill":
         text = f"Backfilled {len(prs)} PRs. " + text
@@ -250,6 +252,49 @@ def _persisted_cursor(fetched, complete: bool) -> str:
     if complete:
         return ""
     return getattr(fetched, "end_cursor", None) or getattr(fetched, "next_cursor", None) or ""
+
+
+MAX_PAGES_LIMIT = 200  # hard ceiling for backfill_all's total page budget
+
+
+def _truncated_connections(prs: list[dict]) -> list[str]:
+    return sorted({
+        connection
+        for pr in prs
+        for connection in (
+            pr.get("truncated_connections", [])
+            if isinstance(pr.get("truncated_connections", []), list)
+            else []
+        )
+        if isinstance(connection, str)
+    })
+
+
+def _backfill_all_message(
+    repo_key: str,
+    coverage: dict | None,
+    *,
+    complete: bool,
+    chunks: int,
+    pages_run: int,
+    prs_run: int,
+    max_pages: int,
+) -> str:
+    """Result text for an 'import all history' run (never implies more than it did)."""
+    if complete and prs_run == 0 and not (coverage and coverage.get("pull_requests_indexed")):
+        return f"No closed pull requests were found for {repo_key}; nothing was indexed."
+    count, low, high = _pr_span(coverage, [])
+    span = f" (#{low}-#{high})" if low is not None and high is not None else ""
+    noun = "PR" if count == 1 else "PRs"
+    lead = f"{repo_key}: indexed {count if count is not None else 0} {noun}{span}"
+    ran = f"{prs_run} imported by this run over {pages_run} page(s) in {chunks} chunk(s)"
+    if complete:
+        return f"{lead}; the full closed pull request history is imported ({ran})."
+    return (
+        f"{lead}; the page cap (max_pages={max_pages}) was reached after {ran}, "
+        "and older history remains. Call again with backfill_all=true to continue "
+        "from the saved cursor."
+    )
 
 
 def _describe_for_message(repo_key: str, namespace: str | None, temporary: bool) -> str:
@@ -272,6 +317,8 @@ def register_indexing_tools(mcp):
         refresh: bool = False,
         namespace: str | None = None,
         backfill: bool = False,
+        backfill_all: bool = False,
+        max_pages: int = 50,
         ctx: Context | None = None,
     ) -> str:
         """Index a repository, refresh it, or continue importing older history.
@@ -280,7 +327,13 @@ def register_indexing_tools(mcp):
         by creation date (a bounded window, not full history). `refresh=true`
         pulls PRs updated since the last refresh. `backfill=true` continues
         older history from the persisted cursor for `pages` pages and works
-        after a restart.
+        after a restart. `backfill_all=true` imports all history as one
+        background job (the initial window first if nothing is indexed, then
+        chunks of `pages` pages from the saved cursor) until history is
+        complete or `max_pages` total pages (clamped to 1-200) were fetched;
+        every chunk is published, so progress survives a crash or restart and a
+        capped run is continued by calling again with `backfill_all=true`.
+        It cannot be combined with `refresh` or `backfill`.
         """
         if ctx is None:
             raise ValueError("Context is required")
@@ -305,6 +358,15 @@ def register_indexing_tools(mcp):
                 "refresh and backfill are separate operations; call ensure_repo_ready "
                 "with only one of them."
             )
+        if backfill_all and (refresh or backfill):
+            raise ValueError(
+                "backfill_all cannot be combined with refresh or backfill; "
+                "backfill_all already continues older history in chunks. Call "
+                "ensure_repo_ready with only one of them."
+            )
+        # Hard clamp, not an error: the page budget is always 1..MAX_PAGES_LIMIT.
+        max_pages = max(1, min(MAX_PAGES_LIMIT, int(max_pages)))
+        history_import = backfill or backfill_all
 
         permanently_indexed = await asyncio.to_thread(
             repo_is_indexed_permanently, repo_key, namespace=namespace
@@ -313,7 +375,7 @@ def register_indexing_tools(mcp):
             repo_is_indexed_temporarily, repo_key, namespace=namespace
         )
 
-        if permanently_indexed and not refresh and not backfill and storage in {None, "permanent"}:
+        if permanently_indexed and not refresh and not history_import and storage in {None, "permanent"}:
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "permanent"
@@ -327,7 +389,7 @@ def register_indexing_tools(mcp):
                 f"{namespace_text(namespace)}"
             )
 
-        if temporarily_indexed and not refresh and not backfill and storage in {None, "temporary"}:
+        if temporarily_indexed and not refresh and not history_import and storage in {None, "temporary"}:
             state["active_repo"] = repo_key
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = "temporary"
@@ -343,7 +405,7 @@ def register_indexing_tools(mcp):
 
         # A refresh or backfill inherits the existing storage choice. First
         # indexing still asks the caller to make the persistence decision.
-        if (refresh or backfill) and storage is None:
+        if (refresh or history_import) and storage is None:
             if permanently_indexed:
                 storage = "permanent"
             elif temporarily_indexed:
@@ -356,19 +418,20 @@ def register_indexing_tools(mcp):
                 f"How would you like to store it?\n\n"
                 f"{STORAGE_CONSEQUENCES}\n"
                 f"Reply with permanent or temporary and I will fetch/index up to {pages * 30} PRs "
-                f"(the newest by creation date; older history can be added later with backfill=true)."
+                f"(the newest by creation date; older history can be added later with backfill=true, "
+                f"or all of it with backfill_all=true)."
             )
 
         temporary = storage == "temporary"
         target_was_indexed = temporarily_indexed if temporary else permanently_indexed
 
-        if backfill:
-            if not target_was_indexed:
+        if backfill and not target_was_indexed:
                 return (
-                    f"{repo_key} is not indexed in {storage} storage, so there is no "
-                    "history to continue. Run ensure_repo_ready first to import the "
-                    f"initial window.{namespace_text(namespace)}"
-                )
+                f"{repo_key} is not indexed in {storage} storage, so there is no "
+                "history to continue. Run ensure_repo_ready first to import the "
+                f"initial window.{namespace_text(namespace)}"
+            )
+        if history_import and target_was_indexed:
             registry = await asyncio.to_thread(
                 get_index_registry, repo_key, namespace, _storage_name(temporary)
             )
@@ -380,7 +443,7 @@ def register_indexing_tools(mcp):
                     f"{repo_key} is already indexed.{summary}{namespace_text(namespace)}"
                 )
 
-        if backfill:
+        if backfill or (backfill_all and target_was_indexed):
             kind = "backfill"
         elif refresh and target_was_indexed:
             kind = "refresh"
@@ -407,6 +470,7 @@ def register_indexing_tools(mcp):
                     "temporary": temporary,
                     "refresh": refresh,
                     "backfill": backfill,
+                    "backfill_all": backfill_all,
                     "started_at": now,
                     "finished_at": now,
                     "error": f"{type(exc).__name__}: {exc}",
@@ -453,7 +517,11 @@ def register_indexing_tools(mcp):
             "temporary": temporary,
             "refresh": refresh,
             "backfill": backfill,
+            "backfill_all": backfill_all,
             "pages": pages,
+            "max_pages": max_pages if backfill_all else None,
+            "pages_done": 0 if backfill_all else None,
+            "prs_indexed": 0 if backfill_all else None,
             "started_at": started_at,
             "finished_at": None,
             "documents_indexed": None,
@@ -474,6 +542,11 @@ def register_indexing_tools(mcp):
                 f"{namespace_text(namespace)}"
             )
 
+        # The phase currently running: a backfill_all job starts as "initial" when
+        # nothing is indexed and switches to "backfill", so a failure is recorded
+        # against the phase that actually failed.
+        run_kind = kind
+
         async def _finish(
             status: str,
             *,
@@ -481,11 +554,12 @@ def register_indexing_tools(mcp):
             message: str,
             history_complete: bool | None = None,
             truncated_connections: list[str] | None = None,
+            action: str | None = None,
         ) -> None:
             """Persist the outcome (epoch protected), then publish the job result."""
             await asyncio.to_thread(
                 _persist_job_outcome, repo_key, namespace, temporary, status, None,
-                expected_epoch, strict=True, kind=kind,
+                expected_epoch, strict=True, kind=run_kind,
             )
             with _INDEX_JOBS_LOCK:
                 cancelled = (_INDEX_JOBS.get(job_key) or {}).get("status") == "cancelled"
@@ -497,6 +571,7 @@ def register_indexing_tools(mcp):
                 documents_indexed=count,
                 truncated_connections=truncated_connections or [],
                 message=message,
+                action=action,
                 history_complete=history_complete,
                 older_history_remaining=(
                     None if history_complete is None else not history_complete
@@ -509,9 +584,167 @@ def register_indexing_tools(mcp):
             state["active_namespace"] = namespace
             state["storage_types"][state_key] = storage
 
+        async def _publish_chunk(chunk_kind, fetched, prs, fetch_complete, chunk_pages):
+            """Index one fetched chunk, then persist its resume point.
+
+            Returns (documents indexed, pages consumed).  The cursor is saved only
+            after the generation is published, so a failure keeps the last good one.
+            """
+            count = 0
+            if prs:
+                count = await asyncio.to_thread(
+                    index_prs,
+                    repo_key,
+                    prs,
+                    temporary=temporary,
+                    namespace=namespace,
+                    # An initial window establishes the refresh watermark;
+                    # a backfill must never move it.
+                    advance_watermark=(chunk_kind == "initial"),
+                    expected_epoch=expected_epoch,
+                    is_refresh=False,
+                )
+            elif chunk_kind == "initial":
+                # Only the initial import syncs with GitHub's newest
+                # state; an empty backfill says nothing about freshness
+                # and must not reset the stale clock.
+                await asyncio.to_thread(
+                    mark_repo_checked,
+                    repo_key,
+                    temporary=temporary,
+                    namespace=namespace,
+                    expected_epoch=expected_epoch,
+                )
+            # Persist the resume point only after the generation is
+            # published: a failure above keeps the last good cursor.
+            cursor_to_save = _persisted_cursor(fetched, fetch_complete)
+            backfill_fields: dict = {
+                "backfill_cursor": cursor_to_save,
+                "history_complete": True if fetch_complete else False,
+                "expected_epoch": expected_epoch,
+            }
+            pages_used = _pages_consumed(chunk_pages, len(prs), fetch_complete)
+            if chunk_kind == "initial":
+                backfill_fields["pages_done"] = pages_used
+            else:
+                backfill_fields["add_pages"] = pages_used
+            if prs or fetch_complete:
+                await asyncio.to_thread(
+                    set_backfill_state,
+                    repo_key,
+                    namespace,
+                    _storage_name(temporary),
+                    **backfill_fields,
+                )
+            return count, pages_used
+
+        def _job_cancelled() -> bool:
+            with _INDEX_JOBS_LOCK:
+                return (_INDEX_JOBS.get(job_key) or {}).get("status") == "cancelled"
+
+        async def _run_backfill_all():
+            """Loop the backfill step until history is complete or max_pages is spent.
+
+            Every chunk is a normal initial/backfill step: it publishes its own
+            generation and persists its cursor, so a crash, failure or restart
+            keeps everything published so far and the next call resumes from the
+            saved cursor.  Writes are epoch protected like any other job, so a
+            delete while running cancels the loop and nothing is resurrected.
+            """
+            nonlocal run_kind
+            pages_run = prs_run = docs_run = chunks = 0
+            truncated: set[str] = set()
+            complete = False
+            while True:
+                if _job_cancelled():
+                    return
+                run_kind = "backfill" if (chunks or target_was_indexed) else "initial"
+                after_cursor = None
+                if run_kind == "backfill":
+                    registry = await asyncio.to_thread(
+                        get_index_registry, repo_key, namespace, _storage_name(temporary)
+                    )
+                    after_cursor = registry.get("backfill_cursor") or None
+                chunk_pages = min(pages, max_pages - pages_run)
+                _set_index_job(job_key, kind=run_kind)
+                print(
+                    f"[*] Import-all chunk {chunks + 1} for {repo_key} ({run_kind}, "
+                    f"{chunk_pages} page(s), {pages_run}/{max_pages} pages used)...",
+                    file=sys.stderr,
+                )
+                fetched = await fetch_prs(
+                    *repo_key.split("/", 1),
+                    pages=chunk_pages,
+                    github_token=github_token,
+                    since_updated_at=None,
+                    after_cursor=after_cursor,
+                    return_result=True,
+                    order_by="CREATED_AT",
+                )
+                if isinstance(fetched, list):  # Compatibility with in-process extensions/tests.
+                    prs, fetch_complete = fetched, True
+                else:
+                    prs, fetch_complete = fetched.prs, bool(fetched.complete)
+                if not prs and not fetch_complete:
+                    # Without progress the loop could never end; stop loudly and
+                    # keep what is already published.
+                    raise RuntimeError(
+                        "GitHub returned an empty page without completing the history; "
+                        "stopping the import."
+                    )
+                count, pages_used = await _publish_chunk(
+                    run_kind, fetched, prs, fetch_complete, chunk_pages
+                )
+                chunks += 1
+                pages_run += pages_used
+                prs_run += len(prs)
+                docs_run += count
+                truncated.update(_truncated_connections(prs))
+                complete = fetch_complete
+                _activate()
+                if _job_cancelled():  # deleted meanwhile: never overwrite the cancellation
+                    return
+                _set_index_job(
+                    job_key,
+                    pages_done=pages_run,
+                    prs_indexed=prs_run,
+                    documents_indexed=docs_run,
+                    history_complete=complete,
+                    older_history_remaining=not complete,
+                    message=(
+                        f"Importing history: {pages_run}/{max_pages} pages, "
+                        f"{prs_run} PRs indexed so far (chunk {chunks})."
+                    ),
+                )
+                if complete or pages_run >= max_pages:
+                    break
+
+            coverage = await asyncio.to_thread(_safe_coverage, repo_key, namespace, temporary)
+            message = _backfill_all_message(
+                repo_key,
+                coverage,
+                complete=complete,
+                chunks=chunks,
+                pages_run=pages_run,
+                prs_run=prs_run,
+                max_pages=max_pages,
+            )
+            await _finish(
+                "ready" if complete else "partial",
+                count=docs_run,
+                message=message,
+                history_complete=complete,
+                truncated_connections=sorted(truncated),
+                action=None if complete else BACKFILL_ALL_CONTINUE_ACTION,
+            )
+            print(f"[+] {message}", file=sys.stderr)
+
         async def _run_indexing():
             try:
                 _set_index_job(job_key, status="running")
+                if backfill_all:
+                    await _run_backfill_all()
+                    return
                 refresh_state = await asyncio.to_thread(
                     get_refresh_state,
                     repo_key,
@@ -573,65 +806,13 @@ def register_indexing_tools(mcp):
                         "GitHub returned a capped refresh without a continuation cursor."
                     )
 
-                truncated_connections = sorted({
-                    connection
-                    for pr in prs
-                    for connection in (
-                        pr.get("truncated_connections", [])
-                        if isinstance(pr.get("truncated_connections", []), list)
-                        else []
-                    )
-                    if isinstance(connection, str)
-                })
+                truncated_connections = _truncated_connections(prs)
 
                 # ── Older-history import: initial window or backfill ──────────
                 if kind in {"initial", "backfill"}:
-                    count = 0
-                    if prs:
-                        count = await asyncio.to_thread(
-                            index_prs,
-                            repo_key,
-                            prs,
-                            temporary=temporary,
-                            namespace=namespace,
-                            # An initial window establishes the refresh watermark;
-                            # a backfill must never move it.
-                            advance_watermark=(kind == "initial"),
-                            expected_epoch=expected_epoch,
-                            is_refresh=False,
-                        )
-                    elif kind == "initial":
-                        # Only the initial import syncs with GitHub's newest
-                        # state; an empty backfill says nothing about freshness
-                        # and must not reset the stale clock.
-                        await asyncio.to_thread(
-                            mark_repo_checked,
-                            repo_key,
-                            temporary=temporary,
-                            namespace=namespace,
-                            expected_epoch=expected_epoch,
-                        )
-                    # Persist the resume point only after the generation is
-                    # published: a failure above keeps the last good cursor.
-                    cursor_to_save = _persisted_cursor(fetched, fetch_complete)
-                    backfill_fields: dict = {
-                        "backfill_cursor": cursor_to_save,
-                        "history_complete": True if fetch_complete else False,
-                        "expected_epoch": expected_epoch,
-                    }
-                    pages_used = _pages_consumed(pages, len(prs), fetch_complete)
-                    if kind == "initial":
-                        backfill_fields["pages_done"] = pages_used
-                    else:
-                        backfill_fields["add_pages"] = pages_used
-                    if prs or fetch_complete:
-                        await asyncio.to_thread(
-                            set_backfill_state,
-                            repo_key,
-                            namespace,
-                            _storage_name(temporary),
-                            **backfill_fields,
-                        )
+                    count, _ = await _publish_chunk(
+                        kind, fetched, prs, fetch_complete, pages
+                    )
                     _activate()
                     coverage = await asyncio.to_thread(
                         _safe_coverage, repo_key, namespace, temporary
@@ -801,7 +982,7 @@ def register_indexing_tools(mcp):
                 )
                 await asyncio.to_thread(
                     _persist_job_outcome, repo_key, namespace, temporary, "failed",
-                    details["error_kind"], expected_epoch, kind=kind,
+                    details["error_kind"], expected_epoch, kind=run_kind,
                 )
                 print(f"[!] Background indexing failed for {repo_key}: {error}", file=sys.stderr)
 
@@ -809,17 +990,26 @@ def register_indexing_tools(mcp):
         _retain_index_task(job_key, task)
 
         storage_label = "temporary (in-memory)" if temporary else "permanent (disk)"
-        if kind == "backfill":
+        if backfill_all:
+            action = "Import of all history"
+        elif kind == "backfill":
             action = "Backfill of older history"
         elif kind == "refresh":
             action = "Refresh"
         else:
             action = "Background indexing"
         scope_note = ""
-        if kind == "initial":
+        if backfill_all:
+            scope_note = (
+                f"\nThis runs as one job: {pages}-page chunks (each published as its own "
+                f"generation) until history is complete or {max_pages} pages in total were "
+                "fetched; progress (pages_done, prs_indexed, history_complete) is in "
+                "get_index_stats. If the cap is hit, call again with backfill_all=true."
+            )
+        elif kind == "initial":
             scope_note = (
                 f"\nThis imports the newest {pages * PAGE_SIZE} closed PRs by creation date "
-                "(a bounded window); use backfill=true later for older history."
+                "(a bounded window); use backfill=true or backfill_all=true later for older history."
             )
         return (
             f"{action} started for {repo_key} [{storage_label}].\n"

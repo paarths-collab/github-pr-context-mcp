@@ -78,7 +78,7 @@ Indexing runs in the background. Check `get_index_stats` before trusting results
 
 - **Bounded window, not full history.** The first import indexes the newest closed/merged PRs, `pages` pages at a time. The default `pages=2` is about 60 PRs; the maximum is 10 pages.
 - **Check `get_index_stats`.** It reports `index_state` and `coverage`: `pull_requests_indexed`, the PR number range (`pr_number_min`/`pr_number_max`), the created-date window (`oldest_pr_created_at`/`newest_pr_created_at`), `history_complete`, and `older_history_remaining`.
-- **Older history.** `ensure_repo_ready({"repo": "owner/repo", "backfill": true})` continues into older history from the persisted cursor, and works after a restart.
+- **Older history.** `ensure_repo_ready({"repo": "owner/repo", "backfill": true})` continues into older history from the persisted cursor, and works after a restart. To import all history in one background job instead, call `ensure_repo_ready({"repo": "owner/repo", "backfill_all": true, "max_pages": 50})`: it publishes a generation per chunk until `history_complete` or `max_pages` total pages (1-200, default 50), and a capped run reports `ready_partial` and is continued by calling it again (`backfill_all` cannot be combined with `refresh` or `backfill`).
 - **`index_state` values:**
   - `no_index`: nothing published and no job.
   - `indexing`: a job is queued or running; the previous generation serves if one exists.
