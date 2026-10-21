@@ -47,6 +47,17 @@ def get_refresh_state(
     )
 
 
+def get_registry_state(
+    repo_key: str, namespace: str | None = None, temporary: bool = False
+) -> dict:
+    """Registry row (generation, backfill, last job) without importing Chroma."""
+    return cursor_store.get_registry(
+        repo_key,
+        namespace=namespace,
+        storage="temporary" if temporary else "permanent",
+    )
+
+
 _VECTOR_EXPORTS = {
     "index_prs",
     "query_similar",
@@ -60,6 +71,18 @@ _VECTOR_EXPORTS = {
     "checkpoint_refresh",
     "complete_refresh",
     "IndexInvalidatedError",
+    "get_active_generation",
+    "compute_coverage",
+    "set_backfill_state",
+    "record_job_outcome",
+    "get_index_registry",
+    "get_documents_by_ids",
+    "get_thread_parts",
+    "lexical_candidates",
+    "extract_query_identifiers",
+    "build_where_filter",
+    "is_bot_metadata",
+    "source_kind_of",
 }
 
 
@@ -78,5 +101,6 @@ __all__ = [
     "set_max_pr_number",
     "get_last_updated_at",
     "get_refresh_state",
+    "get_registry_state",
     "cursor_store",
 ]

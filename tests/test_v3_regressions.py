@@ -205,19 +205,22 @@ def test_review_summary_without_inline_comments_has_own_bot_metadata():
 
     docs, metadatas, ids = document_builder.build_documents(prs)
 
-    assert docs == [
-        "PR #17 overall review by dependabot[bot] [APPROVED]: "
+    # A bot review summary is kept (not dropped) and tagged as bot evidence.
+    assert len(docs) == len(metadatas) == len(ids) == 1
+    assert document_builder.excerpt_from_document(docs[0]) == (
         "Automated dependency review passed."
-    ]
-    assert metadatas[0] == {
-        "type": "review_summary",
-        "pr_number": 17,
-        "state": "APPROVED",
-        "author": "dependabot[bot]",
-        "is_bot": True,
-        "touches_ci": False,
-        "source_truncated": False,
-        "truncated_connections": "[]",
-        "updated_at": "",
-    }
-    assert ids == ["pr-17-review-0"]
+    )
+    metadata = metadatas[0]
+    assert metadata["type"] == "review_summary"
+    assert metadata["source_kind"] == "bot_review_summary"
+    assert metadata["is_bot"] is True
+    assert metadata["author_type"] == "bot"
+    assert metadata["author"] == "dependabot[bot]"
+    assert metadata["pr_number"] == 17
+    assert metadata["touches_ci"] is False
+    assert metadata["source_truncated"] is False
+    assert metadata["truncated_connections"] == "[]"
+    assert metadata["part_index"] == 0 and metadata["part_count"] == 1
+    assert all(value is not None for value in metadata.values())
+    assert ids == [metadata["evidence_id"]]
+    assert ids[0].startswith("pr-17-review-0:")

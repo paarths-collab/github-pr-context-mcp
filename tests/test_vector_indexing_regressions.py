@@ -7,12 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from storage.cursor_store import CursorStore
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Collection:
-    def __init__(self, metadata):
+    def __init__(self, metadata, name=""):
+        self.name = name
         self.metadata = dict(metadata or {})
         self.records = {}
 
@@ -27,16 +30,22 @@ class _Collection:
                 "metadata": dict(metadata),
             }
 
-    def get(self, where=None, include=None):
+    def get(self, ids=None, where=None, include=None, limit=None, offset=0):
         rows = list(self.records.items())
+        if ids is not None:
+            rows = [row for row in rows if row[0] in set(ids)]
         if where:
             rows = [
                 row for row in rows
                 if all(row[1]["metadata"].get(key) == value for key, value in where.items())
             ]
+        if limit is not None:
+            rows = rows[offset : offset + limit]
         return {
             "ids": [identifier for identifier, _ in rows],
+            "documents": [row["document"] for _, row in rows],
             "metadatas": [row["metadata"] for _, row in rows],
+            "embeddings": [row["embedding"] for _, row in rows],
         }
 
     def delete(self, *, ids=None, where=None):
@@ -62,21 +71,26 @@ class _Client:
         if name in self.collections:
             self.collections[name].metadata = dict(metadata or {})
         else:
-            self.collections[name] = _Collection(metadata)
+            self.collections[name] = _Collection(metadata, name)
         return self.collections[name]
 
     def get_collection(self, name):
         return self.collections[name]
 
     def delete_collection(self, name):
+        if name not in self.collections:
+            raise ValueError(f"Collection {name} does not exist")
         del self.collections[name]
 
     def list_collections(self):
         return list(self.collections.values())
 
 
-class _CursorStore:
-    def __init__(self):
+class _CursorStore(CursorStore):
+    """Real registry (tmp SQLite) that also records the cursor-mutation calls."""
+
+    def __init__(self, path):
+        super().__init__(str(path))
         self.set_calls = []
         self.clear_calls = []
         self.checkpoint_calls = []
@@ -84,21 +98,25 @@ class _CursorStore:
 
     def set_cursor(self, *args, **kwargs):
         self.set_calls.append((args, kwargs))
+        return super().set_cursor(*args, **kwargs)
 
     def clear_cursor(self, *args, **kwargs):
         self.clear_calls.append((args, kwargs))
+        return super().clear_cursor(*args, **kwargs)
 
     def checkpoint_refresh(self, *args, **kwargs):
         self.checkpoint_calls.append((args, kwargs))
+        return super().checkpoint_refresh(*args, **kwargs)
 
     def complete_refresh(self, *args, **kwargs):
         self.complete_calls.append((args, kwargs))
+        return super().complete_refresh(*args, **kwargs)
 
 
-def _load_vector_store(monkeypatch):
+def _load_vector_store(monkeypatch, tmp_path):
     persistent = _Client()
     ephemeral = _Client()
-    cursor_store = _CursorStore()
+    cursor_store = _CursorStore(tmp_path / "cursors.db")
     fail_encoding = {"value": False}
 
     chromadb = types.ModuleType("chromadb")
@@ -163,8 +181,8 @@ def _pr(number, documents, *, truncated_connections=None):
     }
 
 
-def test_failed_embedding_does_not_advance_refresh_watermark(monkeypatch):
-    vector_store, cursor_store, fail_encoding = _load_vector_store(monkeypatch)
+def test_failed_embedding_does_not_advance_refresh_watermark(monkeypatch, tmp_path):
+    vector_store, cursor_store, fail_encoding = _load_vector_store(monkeypatch, tmp_path)
     fail_encoding["value"] = True
 
     with pytest.raises(RuntimeError, match="embedding failed"):
@@ -176,8 +194,8 @@ def test_failed_embedding_does_not_advance_refresh_watermark(monkeypatch):
     assert cursor_store.set_calls == []
 
 
-def test_stats_reads_do_not_reset_existing_chroma_metadata(monkeypatch):
-    vector_store, _, _ = _load_vector_store(monkeypatch)
+def test_stats_reads_do_not_reset_existing_chroma_metadata(monkeypatch, tmp_path):
+    vector_store, _, _ = _load_vector_store(monkeypatch, tmp_path)
     repo = "acme/widget"
 
     vector_store.index_prs(
@@ -190,8 +208,8 @@ def test_stats_reads_do_not_reset_existing_chroma_metadata(monkeypatch):
     assert stats["last_indexed_at"] is not None
 
 
-def test_complete_refresh_removes_stale_documents_but_partial_nested_data_does_not(monkeypatch):
-    vector_store, _, _ = _load_vector_store(monkeypatch)
+def test_complete_refresh_removes_stale_documents_but_partial_nested_data_does_not(monkeypatch, tmp_path):
+    vector_store, _, _ = _load_vector_store(monkeypatch, tmp_path)
     repo = "acme/widget"
     initial = _pr(
         1,
@@ -201,27 +219,26 @@ def test_complete_refresh_removes_stale_documents_but_partial_nested_data_does_n
         ],
     )
     vector_store.index_prs(repo, [initial])
-    collection = vector_store._get_collection(repo)
-    assert collection.count() == 2
+    assert vector_store._get_collection(repo).count() == 2
 
+    # Each write publishes a NEW generation, so re-resolve the serving collection.
     vector_store.index_prs(repo, [_pr(1, [])])
-    assert collection.count() == 0
+    assert vector_store._get_collection(repo).count() == 0
 
     partial_repo = "acme/partial-widget"
     vector_store.index_prs(
         partial_repo,
         [_pr(2, [{"id": "pr-2-comment-0", "type": "review_comment", "text": "comment"}])],
     )
-    partial_collection = vector_store._get_collection(partial_repo)
     vector_store.index_prs(
         partial_repo,
         [_pr(2, [], truncated_connections=["reviewThreads.comments"])],
     )
-    assert partial_collection.count() == 1
+    assert vector_store._get_collection(partial_repo).count() == 1
 
 
-def test_namespace_scope_and_deletion_cursor_scope_are_distinct(monkeypatch):
-    vector_store, cursor_store, _ = _load_vector_store(monkeypatch)
+def test_namespace_scope_and_deletion_cursor_scope_are_distinct(monkeypatch, tmp_path):
+    vector_store, cursor_store, _ = _load_vector_store(monkeypatch, tmp_path)
     repo = "acme/widget"
 
     assert vector_store._collection_name(repo, None) != vector_store._collection_name(repo, "_default")
@@ -233,8 +250,8 @@ def test_namespace_scope_and_deletion_cursor_scope_are_distinct(monkeypatch):
     ]
 
 
-def test_deleted_scope_rejects_a_late_index_write(monkeypatch):
-    vector_store, cursor_store, _ = _load_vector_store(monkeypatch)
+def test_deleted_scope_rejects_a_late_index_write(monkeypatch, tmp_path):
+    vector_store, cursor_store, _ = _load_vector_store(monkeypatch, tmp_path)
     repo = "acme/widget"
     epoch = vector_store.get_index_epoch(repo)
 
@@ -251,8 +268,8 @@ def test_deleted_scope_rejects_a_late_index_write(monkeypatch):
     assert cursor_store.set_calls == []
 
 
-def test_deleted_scope_rejects_a_late_empty_check(monkeypatch):
-    vector_store, _, _ = _load_vector_store(monkeypatch)
+def test_deleted_scope_rejects_a_late_empty_check(monkeypatch, tmp_path):
+    vector_store, _, _ = _load_vector_store(monkeypatch, tmp_path)
     repo = "acme/widget"
     epoch = vector_store.get_index_epoch(repo, temporary=True)
 
