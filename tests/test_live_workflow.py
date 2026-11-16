@@ -53,14 +53,21 @@ def test_live_stdio_prompt_and_resource_without_storage(tmp_path):
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                assert (await session.list_tools()).tools == []
+                tools = {t.name for t in (await session.list_tools()).tools}
+                assert tools == {'learning_status', 'record_learning', 'get_lessons', 'list_alerts',
+                                 'acknowledge_alert', 'remove_lesson'}
                 prompts = await session.list_prompts()
-                assert [p.name for p in prompts.prompts] == ['find_pr_context']
+                assert {p.name for p in prompts.prompts} == {
+                    'find_pr_context', 'learn_from_prs', 'check_lessons_before_change'}
+                learn = await session.get_prompt('learn_from_prs', {'repo': 'example/project'})
+                assert 'record_learning' in learn.messages[0].content.text
+                assert 'example/project' in learn.messages[0].content.text
                 prompt = await session.get_prompt('find_pr_context', {'repo': 'example/project', 'task': 'retry rationale'})
                 text = prompt.messages[0].content.text
                 assert 'example/project' in text and 'get_review_comments' in text
                 resource = await session.read_resource('pr-context://workflow')
-                assert 'No local index' in resource.contents[0].text
+                assert 'local PR database, embeddings' in resource.contents[0].text
+                assert 'Learning loop' in resource.contents[0].text
                 assert 'untrusted data' in resource.contents[0].text
         assert list(tmp_path.iterdir()) == []
     asyncio.run(run())
