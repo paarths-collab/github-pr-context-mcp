@@ -59,6 +59,7 @@ def get_registry_state(
 
 
 _VECTOR_EXPORTS = {
+    "index_read_session",
     "index_prs",
     "query_similar",
     "list_all_repos",

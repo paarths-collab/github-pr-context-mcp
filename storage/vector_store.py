@@ -22,6 +22,8 @@ import os
 import re
 import sys
 import threading
+import contextlib
+from pathlib import Path
 from collections import Counter
 from dataclasses import dataclass
 from dotenv import load_dotenv
@@ -42,6 +44,60 @@ _ephemeral_client = chromadb.EphemeralClient()
 # Re-entrant so read helpers can compose (e.g. coverage inside a stats call).
 _chroma_lock = threading.RLock()
 _INDEX_EPOCHS: dict[str, int] = {}
+_process_lock_depth = 0
+
+
+@contextlib.contextmanager
+def index_read_session():
+    """Keep reads/publication/deletion consistent across threads and processes.
+
+    Encoding stays outside this guard. The lock lives beside the persistent
+    Chroma data and is never removed (unlinking a lock file splits ownership).
+    Nested storage helpers reuse the outer acquisition.
+    """
+    global _process_lock_depth
+    with _chroma_lock:
+        if _process_lock_depth:
+            yield
+            return
+        settings = getattr(_persistent_client, "get_settings", lambda: None)()
+        directory = getattr(settings, "persist_directory", None)
+        if not directory:  # in-memory test doubles have no shared disk state
+            yield
+            return
+        path = Path(directory) / ".index.lock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a+b") as handle:
+            if os.name == "nt":
+                import msvcrt
+                import errno
+                import time
+
+                if handle.tell() == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                while True:
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError as exc:
+                        if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                            raise
+                        time.sleep(0.05)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            _process_lock_depth = 1
+            try:
+                yield
+            finally:
+                _process_lock_depth = 0
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 _COPY_BATCH = 500
 _GENERATION_RE_TEMPLATE = r"^{base}-g(\d+)$"
@@ -73,7 +129,9 @@ def get_index_epoch(
     namespace: str | None = None,
 ) -> int:
     """Capture the current in-process write epoch for an index scope."""
-    with _chroma_lock:
+    with index_read_session():
+        if not temporary:
+            return _registry().get_epoch(repo_key, namespace)
         return _INDEX_EPOCHS.get(_index_scope_key(repo_key, temporary, namespace), 0)
 
 
@@ -85,7 +143,7 @@ def _assert_current_epoch(
 ) -> None:
     if expected_epoch is None:
         return
-    current_epoch = _INDEX_EPOCHS.get(_index_scope_key(repo_key, temporary, namespace), 0)
+    current_epoch = get_index_epoch(repo_key, temporary, namespace)
     if current_epoch != expected_epoch:
         raise IndexInvalidatedError(
             f"Index job for {repo_key} was invalidated by a delete request."
@@ -241,7 +299,7 @@ def get_active_generation(
 ) -> int:
     """Return the serving generation number (0 = none or legacy unsuffixed)."""
     temporary = _storage_label(storage) == "temporary"
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
     return active.generation if active else 0
 
@@ -250,7 +308,7 @@ def get_active_generation(
 
 def _is_indexed(repo_key: str, temporary: bool, namespace: str | None) -> bool:
     try:
-        with _chroma_lock:
+        with index_read_session():
             active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
             return active is not None and active.collection.count() > 0
     except Exception:
@@ -294,7 +352,7 @@ def list_all_repos(namespace: str | None = None) -> list[dict]:
             })
         return items
 
-    with _chroma_lock:
+    with index_read_session():
         permanent = _rows(_persistent_client, "permanent")
         temporary = _rows(_ephemeral_client, "temporary")
     return permanent + temporary
@@ -390,6 +448,7 @@ def _pr_ledger_row(pr: dict) -> dict | None:
         "updated_at": pr.get("updated_at") if isinstance(pr.get("updated_at"), str) else "",
         "state": pr.get("state") if isinstance(pr.get("state"), str) else "",
         "nested_incomplete_threads": nested,
+        "truncated_connections": sorted(_truncated_set(pr)),
     }
 
 
@@ -429,6 +488,7 @@ def _ledger_rows_from_metadata(metadatas) -> dict[int, dict]:
                 "updated_at": "",
                 "state": "",
                 "nested_incomplete_threads": 0,
+                "truncated_connections": [],
             },
         )
         created = meta.get("pr_created_at")
@@ -448,6 +508,9 @@ def _ledger_rows_from_metadata(metadatas) -> dict[int, dict]:
                 anonymous[number] = anonymous.get(number, 0) + 1
         if "reviewThreads" in _meta_truncated_connections(meta):
             threads_truncated.add(number)
+        row["truncated_connections"] = sorted(
+            set(row["truncated_connections"]) | set(_meta_truncated_connections(meta))
+        )
     for number, row in rows.items():
         count = len(incomplete.get(number, ())) + anonymous.get(number, 0)
         if number in threads_truncated:
@@ -529,7 +592,7 @@ def index_prs(
     storage = "temporary" if temporary else "permanent"
 
     # Fail fast if the scope was already invalidated, before paying for encoding.
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
 
     # Slow, Chroma-free work runs OUTSIDE the global lock: the first encode_batch
@@ -542,7 +605,7 @@ def index_prs(
             meta["namespace"] = ns
     embeddings = encode_batch(docs) if docs else []
 
-    with _chroma_lock:
+    with index_read_session():
         # A delete while we were encoding bumps the epoch; do not stage over it.
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         registry = _registry()
@@ -632,7 +695,8 @@ def index_prs(
                 mark_checked=sets_checked,
             )
         except BaseException:
-            _safe_delete_collection(client, staged_name)
+            if staged is not None:
+                _safe_delete_collection(client, staged_name)
             raise
 
         # Published. Keep only the new generation and the previous one.
@@ -681,7 +745,7 @@ def mark_repo_checked(
     expected_epoch: int | None = None,
 ) -> None:
     """Record a successful GitHub sync even if it produced no new documents."""
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         _registry().mark_checked(
             repo_key,
@@ -700,7 +764,7 @@ def checkpoint_refresh(
     expected_epoch: int | None = None,
 ) -> None:
     """Persist a partial refresh only when its index scope is still current."""
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         _registry().checkpoint_refresh(
             repo_key,
@@ -721,7 +785,7 @@ def complete_refresh(
     expected_epoch: int | None = None,
 ) -> None:
     """Commit a completed refresh only when its index scope is still current."""
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, temporary, namespace, expected_epoch)
         _registry().complete_refresh(
             repo_key,
@@ -754,7 +818,7 @@ def set_backfill_state(
     (True / False / None = unknown).  Never moves the refresh watermark.
     """
     label = _storage_label(storage)
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, label == "temporary", namespace, expected_epoch)
         kwargs = {}
         if backfill_cursor is not _UNSET:
@@ -785,7 +849,7 @@ def record_job_outcome(
     outcomes into the separate refresh-health fields as well.
     """
     label = _storage_label(storage)
-    with _chroma_lock:
+    with index_read_session():
         _assert_current_epoch(repo_key, label == "temporary", namespace, expected_epoch)
         _registry().record_job_outcome(
             repo_key,
@@ -835,7 +899,7 @@ def compute_coverage(
     """
     label = _storage_label(storage)
     temporary = label == "temporary"
-    with _chroma_lock:
+    with index_read_session():
         registry = _registry()
         reg = registry.get_registry(repo_key, namespace=namespace, storage=label)
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
@@ -862,6 +926,14 @@ def compute_coverage(
             summary_row = {
                 **summary_row, "oldest_pr_created_at": None, "newest_pr_created_at": None
             }
+        if active is not None and not summary_row.get("truncation_known", True):
+            # Pre-upgrade ledger rows did not archive nested truncation. Recover
+            # it from the serving documents without rewriting the user's index.
+            summary_row["truncated_connections"] = sorted({
+                c for batch in _iter_records(active.collection, ["metadatas"])
+                for meta in batch.get("metadatas") or [] if isinstance(meta, dict)
+                for c in _meta_truncated_connections(meta)
+            })
         if active is not None and summary_row["count"] == 0 and units > 0:
             derived = True
             rows: dict[int, dict] = {}
@@ -889,6 +961,9 @@ def compute_coverage(
                 "nested_incomplete_threads": sum(
                     r["nested_incomplete_threads"] for r in rows.values()
                 ),
+                "truncated_connections": sorted({
+                    c for r in rows.values() for c in r["truncated_connections"]
+                }),
             }
 
     history_complete = reg.get("history_complete")
@@ -908,6 +983,7 @@ def compute_coverage(
 
     count = summary_row["count"]
     nested = summary_row["nested_incomplete_threads"]
+    truncated = sorted(set(summary_row.get("truncated_connections", [])) - {"pullRequests"})
     if count == 0:
         summary = "No closed pull requests are indexed for this repository scope yet"
         if units:
@@ -934,6 +1010,8 @@ def compute_coverage(
                 summary += "; history completeness is unknown, so older history may remain"
         if derived:
             summary += " (derived from document metadata; this index has no coverage ledger)"
+        if truncated:
+            summary += "; nested connections remain incomplete: " + ", ".join(truncated)
         summary += "."
 
     return {
@@ -948,6 +1026,7 @@ def compute_coverage(
         "history_complete": history_complete,
         "older_history_remaining": bool(older_remaining),
         "nested_incomplete_units": nested,
+        "truncated_connections": truncated,
         "evidence_units": units,
         "generation": active.generation if active else 0,
         "checked_at": reg.get("last_checked_at") or reg.get("generation_published_at"),
@@ -1054,7 +1133,7 @@ def query_similar(
     candidates pass the filters (or the collection is exhausted).
     """
     embedding = query_embedding if query_embedding is not None else encode(query_text)
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         if active is None:
             return []
@@ -1110,7 +1189,7 @@ def get_documents_by_ids(
     wanted = [i for i in dict.fromkeys(ids or []) if isinstance(i, str) and i]
     if not wanted:
         return []
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         if active is None:
             return []
@@ -1141,7 +1220,7 @@ def get_thread_parts(
     """
     if not isinstance(thread_evidence_id, str) or not thread_evidence_id:
         return []
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         if active is None:
             return []
@@ -1276,7 +1355,7 @@ def lexical_candidates(
     total_len = 0
     df: Counter = Counter()
 
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         if active is None:
             return []
@@ -1350,7 +1429,7 @@ def get_collection_stats(
 ) -> dict:
     storage = "temporary" if temporary else "permanent"
     ns = _normalize_namespace(namespace)
-    with _chroma_lock:
+    with index_read_session():
         active = _resolve_active(repo_key, temporary=temporary, namespace=namespace)
         reg = _registry().get_registry(repo_key, namespace=namespace, storage=storage)
         count = 0
@@ -1423,7 +1502,7 @@ def delete_repo_index(
 
     deleted = {"temporary": False, "permanent": False}
 
-    with _chroma_lock:
+    with index_read_session():
         if storage in {"temporary", "both"}:
             key = _index_scope_key(repo_key, True, namespace)
             _INDEX_EPOCHS[key] = _INDEX_EPOCHS.get(key, 0) + 1
@@ -1431,6 +1510,7 @@ def delete_repo_index(
 
         if storage in {"permanent", "both"}:
             key = _index_scope_key(repo_key, False, namespace)
+            _registry().bump_epoch(repo_key, namespace)
             _INDEX_EPOCHS[key] = _INDEX_EPOCHS.get(key, 0) + 1
             deleted["permanent"] = _delete_scope_collections(_persistent_client, repo_key, namespace)
 

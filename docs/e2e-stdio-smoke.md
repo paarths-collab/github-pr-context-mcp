@@ -1,3 +1,5 @@
+> This document describes legacy indexed mode (`github-pr-context-indexed`, installed with the `indexed` extra). The default workflow now fetches live through the official GitHub MCP; see the project README.
+
 # Stdio end-to-end smoke test
 
 Proves the published artifact works the way an IDE uses it: **build the wheel, install it into a
@@ -25,6 +27,9 @@ seconds) and the `mcp` package in the interpreter that runs the script. The test
 (reuse a venv that already has the wheel; pytest only), `E2E_ENCODER=real|fake|auto`,
 `E2E_TRANSCRIPT=/path.json`.
 
+The installation import probe has its own temporary storage paths, even before the
+server sandbox exists and when reusing `E2E_VENV`.
+
 ## What is isolated
 
 | Concern | How |
@@ -49,7 +54,8 @@ Revoked auth is simulated by creating a flag file; while it exists the stub answ
    summary, `exclude_bots`, `source_kinds`, `budget_tokens=256`, `candidate_conflicts` for the retry
    reversal (`#105` vs `#106`), prompt-injection text only inside an excerpt.
 5. `get_evidence` returns every part of the 53-comment thread (the last comments come from a follow-up
-   `node(id:)` query).
+   `node(id:)` query), then retrieves the same parts with a smaller budget and explicit continuation offsets.
+   Evidence responses also verify their payload budget scope and complete serialized response estimate.
 6. A `temporary` index; `backfill=true` makes a previously unreachable PR retrievable (`ready_partial`).
 7. Refresh, then revoked auth: `index_state=stale`, `error_kind=authorization_revoked`, search still serves
    the previous generation with a warning.

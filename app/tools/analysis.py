@@ -52,8 +52,9 @@ def register_analysis_tools(mcp):
         Use 'only_ci=True' to filter for PRs that touched CI/CD files (Workflows, Docker, etc).
         'exclude_bots' drops bot-authored evidence before ranking; 'source_kinds' limits the kinds
         (human_review_thread, bot_review_thread, human_review_summary, bot_review_summary,
-        pr_description, commit_message). 'budget_tokens' (256-16000) caps the response size; whole
-        evidence units are returned, never truncated.
+        pr_description, commit_message). 'budget_tokens' (256-16000) limits the estimated evidence
+        payload, including legacy copies; envelope overhead is reported separately. Whole units
+        are returned, never truncated.
         Returns an evidence envelope (results, coverage, warnings) for the IDE agent to analyze.
         """
         repo_key, namespace, temporary = await _scope(ctx, repo, namespace, file_path, "semantic_search_reviews")
@@ -310,13 +311,20 @@ def register_analysis_tools(mcp):
         repo: str | None = None,
         namespace: str | None = None,
         file_path: str | None = None,
+        part_offset: int = 0,
+        budget_tokens: int = 16_000,
         ctx: Context | None = None,
     ) -> str:
         """
         Expand one evidence unit (by the evidence_id from any search result) to every part of its
-        review thread or message, returned in the standard evidence envelope. Use it when a search
-        result's part_count is greater than 1 or its excerpt looks cut off.
+        review thread or message, returned in the standard evidence envelope. For a large thread,
+        follow pagination.next_part_offset with the same evidence_id until has_more is false.
+        budget_tokens limits the estimated evidence payload, excluding envelope overhead.
+        If a part cannot fit, minimum_budget_tokens reports the budget needed before continuing.
         """
         repo_key, namespace, temporary = await _scope(ctx, repo, namespace, file_path, "get_evidence")
-        envelope = await asyncio.to_thread(fetch_evidence, repo_key, namespace, temporary, evidence_id)
+        envelope = await asyncio.to_thread(
+            fetch_evidence, repo_key, namespace, temporary, evidence_id,
+            part_offset=part_offset, budget_tokens=budget_tokens,
+        )
         return dump_envelope(envelope)

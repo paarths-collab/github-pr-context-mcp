@@ -23,11 +23,11 @@ def test_local_installer_prefers_the_isolated_installed_command(monkeypatch):
     monkeypatch.setattr(
         installer.shutil,
         "which",
-        lambda command: "C:/Users/example/.local/bin/github-pr-context-mcp.exe",
+        lambda command: "C:/Users/example/.local/bin/github-pr-context-indexed.exe",
     )
 
     config = installer.prompt_config()
 
     assert config == {
-        "command": "C:/Users/example/.local/bin/github-pr-context-mcp.exe"
+        "command": "C:/Users/example/.local/bin/github-pr-context-indexed.exe"
     }

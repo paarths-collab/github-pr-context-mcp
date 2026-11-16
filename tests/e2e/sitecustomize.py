@@ -213,7 +213,7 @@ if os.environ.get("E2E_STUB") == "1":
         sys.meta_path.insert(0, _EncoderFinder())
 
     _pid_file = os.environ.get("E2E_PID_FILE")
-    if _pid_file and os.path.basename(sys.argv[0] or "") == "github-pr-context-mcp":
+    if _pid_file and os.path.basename(sys.argv[0] or "") in {"github-pr-context-mcp", "github-pr-context-indexed"}:
         with open(_pid_file, "w", encoding="utf-8") as handle:
             handle.write(str(os.getpid()))
         _log(event="server_start")

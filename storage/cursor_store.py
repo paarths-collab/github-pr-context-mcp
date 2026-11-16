@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import sqlite3
 import threading
@@ -67,7 +68,22 @@ def _create_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT,
             state TEXT,
             nested_incomplete_threads INTEGER DEFAULT 0,
+            truncated_connections TEXT,
             PRIMARY KEY (repo_key, namespace, storage, generation, pr_number)
+        )
+    ''')
+    ledger_columns = {row[1] for row in conn.execute("PRAGMA table_info(pr_ledger)")}
+    if "truncated_connections" not in ledger_columns:
+        try:
+            conn.execute("ALTER TABLE pr_ledger ADD COLUMN truncated_connections TEXT")
+        except sqlite3.OperationalError:
+            if "truncated_connections" not in {r[1] for r in conn.execute("PRAGMA table_info(pr_ledger)")}:
+                raise
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS index_epochs (
+            repo_key TEXT NOT NULL, namespace TEXT NOT NULL,
+            storage TEXT NOT NULL, epoch INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (repo_key, namespace, storage)
         )
     ''')
 
@@ -369,6 +385,23 @@ class CursorStore:
                 (repo_key, ns, storage),
             )
 
+    def get_epoch(self, repo_key: str, namespace: str | None = None) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT epoch FROM index_epochs WHERE repo_key=? AND namespace=? AND storage='permanent'",
+                (repo_key, self._namespace_key(namespace)),
+            ).fetchone()
+        return row[0] if row else 0
+
+    def bump_epoch(self, repo_key: str, namespace: str | None = None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO index_epochs (repo_key, namespace, storage, epoch)
+                   VALUES (?, ?, 'permanent', 1)
+                   ON CONFLICT(repo_key, namespace, storage) DO UPDATE SET epoch=epoch+1""",
+                (repo_key, self._namespace_key(namespace)),
+            )
+
     # ── Registry (generations, backfill state, last job outcome) ──────────
 
     @staticmethod
@@ -524,9 +557,9 @@ class CursorStore:
                 conn.execute(
                     """INSERT OR REPLACE INTO pr_ledger
                        (repo_key, namespace, storage, generation, pr_number, created_at,
-                        updated_at, state, nested_incomplete_threads)
+                        updated_at, state, nested_incomplete_threads, truncated_connections)
                        SELECT repo_key, namespace, storage, ?, pr_number, created_at,
-                              updated_at, state, nested_incomplete_threads
+                              updated_at, state, nested_incomplete_threads, truncated_connections
                        FROM pr_ledger
                        WHERE repo_key = ? AND namespace = ? AND storage = ? AND generation = ?""",
                     (generation, *key, base_generation),
@@ -541,8 +574,8 @@ class CursorStore:
                     conn.execute(
                         """INSERT OR REPLACE INTO pr_ledger
                            (repo_key, namespace, storage, generation, pr_number, created_at,
-                            updated_at, state, nested_incomplete_threads)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            updated_at, state, nested_incomplete_threads, truncated_connections)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             *key,
                             generation,
@@ -551,6 +584,7 @@ class CursorStore:
                             item.get("updated_at") or "",
                             item.get("state") or "",
                             int(item.get("nested_incomplete_threads") or 0),
+                            json.dumps(item.get("truncated_connections") or []),
                         ),
                     )
                 conn.execute(
@@ -596,7 +630,7 @@ class CursorStore:
             generation = self.get_registry(repo_key, namespace, storage)["active_generation"]
         with self._conn(storage) as conn:
             rows = conn.execute(
-                """SELECT pr_number, created_at, updated_at, state, nested_incomplete_threads
+                """SELECT pr_number, created_at, updated_at, state, nested_incomplete_threads, truncated_connections
                    FROM pr_ledger
                    WHERE repo_key = ? AND namespace = ? AND storage = ? AND generation = ?
                    ORDER BY pr_number""",
@@ -609,6 +643,8 @@ class CursorStore:
                 "updated_at": r[2] or "",
                 "state": r[3] or "",
                 "nested_incomplete_threads": r[4] or 0,
+                "truncated_connections": json.loads(r[5] or "[]"),
+                "truncation_known": r[5] is not None,
             }
             for r in rows
         ]
@@ -634,6 +670,8 @@ class CursorStore:
             "newest_pr_updated_at": updated[-1] if updated else None,
             "states": sorted({r["state"] for r in rows if r["state"]}),
             "nested_incomplete_threads": sum(r["nested_incomplete_threads"] for r in rows),
+            "truncated_connections": sorted({c for r in rows for c in r["truncated_connections"]}),
+            "truncation_known": all(r["truncation_known"] for r in rows),
         }
 
     def set_backfill_state(

@@ -1,3 +1,5 @@
+> This document describes legacy indexed mode (`github-pr-context-indexed`, installed with the `indexed` extra). The default workflow now fetches live through the official GitHub MCP; see the project README.
+
 # Client configurations
 
 v0.3 uses the same local server command for every client:

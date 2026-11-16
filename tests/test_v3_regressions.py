@@ -1,3 +1,4 @@
+import contextlib
 import asyncio
 import importlib.util
 import json
@@ -20,6 +21,7 @@ def _load_analysis_module(monkeypatch):
 
     storage_module = types.ModuleType("storage")
     storage_module.__path__ = []
+    storage_module.index_read_session = contextlib.contextmanager(lambda: iter([None]))
     for name in (
         "compute_coverage",
         "get_collection_stats",
@@ -180,6 +182,7 @@ def test_semantic_search_reviews_resolves_state_helpers(monkeypatch):
             "exclude_bots": False,
             "source_kinds": None,
             "where": None,
+            "evidence_copies": 1,
         },
     )
     payload = json.loads(response)

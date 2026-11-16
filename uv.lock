@@ -937,11 +937,13 @@ wheels = [
 name = "github-pr-context-mcp"
 version = "0.3.3"
 source = { editable = "." }
-dependencies = [
+dependencies = [{ name = "mcp" }]
+
+[package.optional-dependencies]
+indexed = [
     { name = "chromadb" },
     { name = "httpx" },
     { name = "keyring" },
-    { name = "mcp" },
     { name = "numpy" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -949,27 +951,23 @@ dependencies = [
     { name = "starlette" },
     { name = "tenacity" },
 ]
-
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-]
+test = [{ name = "pytest" }]
 
 [package.metadata]
 requires-dist = [
-    { name = "chromadb", specifier = "==0.5.0" },
-    { name = "httpx", specifier = ">=0.27.1,<1.0" },
-    { name = "keyring", specifier = ">=25.0,<26.0" },
+    { name = "chromadb", marker = "extra == 'indexed'", specifier = "==0.5.0" },
+    { name = "httpx", marker = "extra == 'indexed'", specifier = ">=0.27.1,<1.0" },
+    { name = "keyring", marker = "extra == 'indexed'", specifier = ">=25.0,<26.0" },
     { name = "mcp", specifier = ">=1.27.2,<2.0" },
-    { name = "numpy", specifier = ">=1.22.5,<2.0" },
+    { name = "numpy", marker = "extra == 'indexed'", specifier = ">=1.22.5,<2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.2.0" },
-    { name = "python-dotenv", specifier = "==1.0.1" },
-    { name = "requests", specifier = "==2.31.0" },
-    { name = "sentence-transformers", specifier = "==2.7.0" },
-    { name = "starlette", specifier = ">=0.27" },
-    { name = "tenacity", specifier = "==8.2.3" },
+    { name = "python-dotenv", marker = "extra == 'indexed'", specifier = "==1.0.1" },
+    { name = "requests", marker = "extra == 'indexed'", specifier = "==2.31.0" },
+    { name = "sentence-transformers", marker = "extra == 'indexed'", specifier = "==2.7.0" },
+    { name = "starlette", marker = "extra == 'indexed'", specifier = ">=0.27" },
+    { name = "tenacity", marker = "extra == 'indexed'", specifier = "==8.2.3" },
 ]
-provides-extras = ["test"]
+provides-extras = ["indexed", "test"]
 
 [[package]]
 name = "googleapis-common-protos"

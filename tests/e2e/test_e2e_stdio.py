@@ -3,7 +3,7 @@
 Marked ``e2e`` and OPT-IN: a bare ``pytest`` skips it because it costs ~2.5 minutes
 and downloads torch on a cold cache. Run it with ``E2E_RUN=1 pytest tests/e2e`` or by
 selecting the marker (``pytest -m e2e``, which needs no ``E2E_RUN``). It builds the wheel, installs it into a brand-new Python 3.11 venv
-with uv, launches the INSTALLED ``github-pr-context-mcp`` console script and drives
+with uv, launches the INSTALLED ``github-pr-context-indexed`` console script and drives
 it with the official ``mcp`` client (see tests/e2e/e2e_harness.py for the flow and
 tests/e2e/sitecustomize.py for the in-process GitHub stub). Takes 1-2 minutes with a
 warm uv cache (first run downloads torch from PyPI).

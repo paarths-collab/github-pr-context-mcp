@@ -458,9 +458,8 @@ def test_publish_rechecks_epoch_after_staging_succeeds(env, monkeypatch):
 
     def assert_with_bump(*args, **kwargs):
         calls["n"] += 1
-        if calls["n"] == 2:  # the pre-publish re-check
-            key = vs._index_scope_key(repo, False, None)
-            vs._INDEX_EPOCHS[key] = vs._INDEX_EPOCHS.get(key, 0) + 1
+        if calls["n"] == 3:  # the pre-publish re-check, after staging
+            cursor_module.cursor_store.bump_epoch(repo)
         return original_assert(*args, **kwargs)
 
     monkeypatch.setattr(vs, "_assert_current_epoch", assert_with_bump)

@@ -425,7 +425,7 @@ def test_token_estimate_matches_emitted_json_for_cjk_and_emoji(rt, monkeypatch):
     ))
     assert "\\u" not in emitted and "请把这个重试逻辑" in emitted and "🚀" in emitted
     parsed = json.loads(emitted)
-    assert parsed["budget"]["used_tokens"] == sum(retrieval.estimate_tokens(u) for u in parsed["results"])
+    assert parsed["budget"]["used_tokens"] == 2 * sum(retrieval.estimate_tokens(u) for u in parsed["results"])
 
     # get_evidence uses the same serialisation.
     mcp = _FakeMCP()
