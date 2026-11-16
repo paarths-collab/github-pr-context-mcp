@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import contextlib
+import math
 import json
 import os
 import shutil
@@ -154,21 +155,37 @@ def fresh_install(workdir: Path, rec: Recorder) -> dict:
 
         t0 = time.monotonic()
         _run(["uv", "venv", "--python", "3.11", str(venv)])
-        _run(["uv", "pip", "install", "--python", str(venv / "bin" / "python"), str(wheel)])
+        _run(["uv", "pip", "install", "--python", str(venv / "bin" / "python"), str(wheel) + "[indexed]"])
         rec.timings["venv_and_install_secs"] = round(time.monotonic() - t0, 2)
         rec.say(f"fresh venv + wheel install in {rec.timings['venv_and_install_secs']}s")
         rec.facts["wheel"] = wheel.name
 
     python = venv / "bin" / "python"
-    script = venv / "bin" / "github-pr-context-mcp"
+    script = venv / "bin" / "github-pr-context-indexed"
     # Prove the INSTALLED copy is what imports: run from an empty cwd, no repo on the path.
     empty = workdir / "empty-cwd"
     empty.mkdir(exist_ok=True)
+    # The import itself initializes/migrates storage. Isolate it before the
+    # server Sandbox exists, including when E2E_VENV reuses an installation.
+    probe_state = workdir / "install-probe"
+    probe_state.mkdir(exist_ok=True)
+    probe_env = {
+        key: value for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "VIRTUAL_ENV", "PYTHONHOME"}
+    }
+    probe_env.update({
+        "CHROMA_PERSIST_DIR": str(probe_state / "chroma"),
+        "CURSOR_DB_PATH": str(probe_state / "cursors.db"),
+        "AUTH_REGISTRY_PATH": str(probe_state / "auth.json"),
+        "USAGE_STATS_PATH": str(probe_state / "usage.json"),
+        "AUTH_REQUIRED": "false", "USAGE_TRACKING_ENABLED": "false",
+        "ANONYMIZED_TELEMETRY": "false", "PYTHONDONTWRITEBYTECODE": "1",
+    })
     probe = subprocess.run(
         [str(python), "-I", "-c",
          "import app, storage, importlib.metadata as m; "
          "print(app.__file__); print(storage.__file__); print(m.version('github-pr-context-mcp'))"],
-        cwd=empty, check=True, capture_output=True, text=True,
+        cwd=empty, check=True, capture_output=True, text=True, env=probe_env,
     ).stdout.split("\n")
     info = {"venv": str(venv), "python": str(python), "script": str(script),
             "app_file": probe[0], "storage_file": probe[1], "version": probe[2]}
@@ -282,6 +299,11 @@ class Server:
             data = json.loads(text)
         except ValueError:
             data = None
+        if isinstance(data, dict) and isinstance(data.get("budget"), dict):
+            self.rec.check(data["budget"].get("scope") == "evidence_units",
+                           f"{tool}: budget explicitly covers evidence payload")
+            self.rec.check(data["budget"].get("estimated_response_tokens") == math.ceil(len(text) / 4),
+                           f"{tool}: total wire-size estimate includes envelope overhead")
         self.rec.step(tool, args, secs, data if data is not None else text)
         self.rec.say(f"{tool}({_brief(args)}) -> {_summary(tool, data, text)}  [{secs:.2f}s]")
         return Reply(text, data, secs)
@@ -501,6 +523,29 @@ async def run_flow(info: dict, sb: Sandbox, rec: Recorder) -> None:
                   "nested pagination completed: no thread is flagged incomplete")
         node_queries = [e for e in sb.stub_entries() if e.get("op") == "GetThreadComments"]
         rec.check(node_queries, "the server issued a follow-up GetThreadComments node query")
+
+        # Exercise continuation through the real MCP schema, with a budget that
+        # fits the largest single part but cannot fit the whole thread.
+        page_budget = max(math.ceil(len(json.dumps(p, ensure_ascii=False)) / 4) for p in parts)
+        paged, offset, pages_read = [], 0, 0
+        while True:
+            page = (await srv.call("get_evidence", evidence_id=multi[0]["evidence_id"],
+                                   repo=REPO, part_offset=offset, budget_tokens=page_budget)).data
+            rec.check(page["results"], "get_evidence continuation makes progress")
+            paged.extend(p["evidence_id"] for p in page["results"])
+            pages_read += 1
+            if not page["pagination"]["has_more"]:
+                break
+            next_offset = page["pagination"]["next_part_offset"]
+            rec.check(next_offset > offset and pages_read <= len(parts), "continuation advances within the thread")
+            offset = next_offset
+        rec.check(pages_read > 1 and paged == [p["evidence_id"] for p in parts],
+                  "get_evidence pagination retrieves every part without gaps or duplicates")
+
+        legacy = (await srv.call("review_code_with_history", code="HttpClient retry timeout",
+                                 repo=REPO, budget_tokens=2048)).data
+        rec.check(legacy["budget"]["evidence_copies"] == 2 and legacy["historical_context"] == legacy["results"],
+                  "legacy tool accounts for both copies of the evidence payload")
 
         # ── temporary storage index (must vanish after restart) ──
         rec.section("session 1: temporary-storage index")

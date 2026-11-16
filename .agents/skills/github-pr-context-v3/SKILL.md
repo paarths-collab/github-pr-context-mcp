@@ -1,6 +1,6 @@
 ---
 name: github-pr-context-v3
-description: Retrieve historical GitHub pull-request evidence through the github-pr-context-mcp v3 server, then reason over it in the IDE agent. Use for nontrivial implementation, code review, debugging, test design, refactoring, security review, or team-convention questions where repository history could affect the result. Do not use it to request server-side LLM reasoning or generation.
+description: Use only when the user explicitly selects the legacy indexed github-pr-context-indexed server. Retrieve historical evidence from its existing local PR index. For live retrieval through the official GitHub MCP, use github-pr-context instead.
 ---
 
 # GitHub PR Context v3

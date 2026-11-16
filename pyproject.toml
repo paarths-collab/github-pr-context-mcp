@@ -1,7 +1,7 @@
 [project]
 name = "github-pr-context-mcp"
 version = "0.3.3"
-description = "Find the dated review evidence behind the code: a local MCP server that retrieves GitHub PR review history, with source links, human/bot provenance and honest coverage."
+description = "Live PR review context through the official GitHub MCP, with an optional legacy local index."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -18,8 +18,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Version Control :: Git",
 ]
-dependencies = [
-    "mcp>=1.27.2,<2.0",
+dependencies = ["mcp>=1.27.2,<2.0"]
+
+[project.optional-dependencies]
+indexed = [
     "chromadb==0.5.0",
     # Chroma 0.5 imports np.float_, which NumPy 2 removed.
     "numpy>=1.22.5,<2.0",
@@ -31,11 +33,7 @@ dependencies = [
     "starlette>=0.27",
     "keyring>=25.0,<26.0"
 ]
-
-[project.optional-dependencies]
-test = [
-    "pytest==8.2.0",
-]
+test = ["pytest==8.2.0"]
 
 [tool.pytest.ini_options]
 # The suite lives in tests/. Without this, a bare `python -m pytest` collects
@@ -47,7 +45,8 @@ markers = [
 ]
 
 [project.scripts]
-github-pr-context-mcp = "entrypoints.local.server:main"
+github-pr-context-mcp = "entrypoints.local.live:main"
+github-pr-context-indexed = "entrypoints.local.server:main"
 
 [build-system]
 # >=77 for PEP 639 `license = "MIT"` / `license-files`; the older
@@ -75,3 +74,6 @@ include = [
 "share/github-pr-context-mcp/skills/github-pr-context-v3/agents" = [
     ".agents/skills/github-pr-context-v3/agents/openai.yaml",
 ]
+
+"share/github-pr-context-mcp/skills/github-pr-context" = [".agents/skills/github-pr-context/SKILL.md"]
+"share/github-pr-context-mcp/skills/github-pr-context/agents" = [".agents/skills/github-pr-context/agents/openai.yaml"]

@@ -40,8 +40,9 @@ from storage import (
     lexical_candidates,
     query_similar,
     source_kind_of,
+    index_read_session,
 )
-from storage.document_builder import excerpt_from_document
+from storage.document_builder import excerpt_from_document, latest_known_update
 from storage.encoder import encode
 
 SCHEMA_VERSION = 1
@@ -213,6 +214,16 @@ def _str(value) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _truncations(meta: dict) -> list[str]:
+    raw = meta.get("truncated_connections") or []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = []
+    return sorted({v for v in raw if isinstance(v, str)}) if isinstance(raw, list) else []
+
+
 def _author_type(meta: dict) -> str:
     declared = meta.get("author_type")
     if declared in _AUTHOR_TYPES:
@@ -269,7 +280,11 @@ def project_unit(repo: str, hit: dict, *, score: float | None, match: str) -> di
         "author_type": _author_type(meta),
         "is_bot": is_bot,
         "created_at": _str(meta.get("created_at")),
-        "updated_at": _str(meta.get("updated_at")),
+        "updated_at": latest_known_update(hit),
+        "latest_comment_updated_at": _str(meta.get("latest_comment_updated_at")),
+        "body_sha256": _str(meta.get("body_sha256")),
+        "source_truncated": bool(meta.get("source_truncated")),
+        "truncated_connections": _truncations(meta),
         "observed_at": _str(meta.get("observed_at")),
         "original_commit": _str(meta.get("original_commit")) or None,
         "original_path": original_path,
@@ -299,19 +314,32 @@ def project_unit(repo: str, hit: dict, *, score: float | None, match: str) -> di
 
 
 def estimate_tokens(unit: dict) -> int:
-    """ceil(len(json(unit)) / 4), counted with the same serialisation we emit."""
+    """Approximate one evidence copy's payload cost: compact JSON chars / 4."""
     return math.ceil(len(json.dumps(unit, ensure_ascii=JSON_ENSURE_ASCII)) / 4)
 
 
-# ``ensure_ascii=False`` everywhere: the token estimate and every emitter share this
-# setting so the reported ``used_tokens`` describes what is actually sent (escaped
-# \\uXXXX sequences would inflate CJK/emoji text ~6x relative to the estimate).
+# All estimates and emitters share the Unicode setting. Whitespace, envelope
+# metadata and guidance are overhead, included in estimated_response_tokens.
 JSON_ENSURE_ASCII = False
 
 
 def dump_envelope(envelope: dict) -> str:
-    """Serialise an envelope for a tool response (same settings as the estimate)."""
+    """Serialise an envelope and report its complete chars/4 wire-size estimate."""
+    _update_response_estimate(envelope)
     return json.dumps(envelope, indent=2, ensure_ascii=JSON_ENSURE_ASCII)
+
+
+def _update_response_estimate(envelope: dict) -> None:
+    """Report total wire overhead separately from the evidence payload budget."""
+    budget = envelope.get("budget")
+    if not isinstance(budget, dict):
+        return
+    budget.setdefault("estimated_response_tokens", 0)
+    while True:
+        estimated = math.ceil(len(json.dumps(envelope, indent=2, ensure_ascii=JSON_ENSURE_ASCII)) / 4)
+        if estimated == budget["estimated_response_tokens"]:
+            return
+        budget["estimated_response_tokens"] = estimated
 
 
 def clamp_budget(budget_tokens) -> int:
@@ -322,14 +350,14 @@ def clamp_budget(budget_tokens) -> int:
     return max(BUDGET_MIN, min(BUDGET_MAX, value))
 
 
-def fit_budget(units: list[dict], requested: int, *, contiguous: bool = False) -> tuple[list[dict], int, int]:
+def fit_budget(units: list[dict], requested: int, *, contiguous: bool = False, copies: int = 1) -> tuple[list[dict], int, int]:
     """Add whole units in rank order; never truncate. Returns (kept, used, omitted)."""
     kept: list[dict] = []
     used = 0
     omitted = 0
     blocked = False
     for unit in units:
-        cost = estimate_tokens(unit)
+        cost = estimate_tokens(unit) * copies
         if blocked or used + cost > requested:
             omitted += 1
             blocked = blocked or contiguous
@@ -462,6 +490,7 @@ def build_envelope(
     action: str | None = None,
     contiguous_budget: bool = False,
     lookup: bool = False,
+    evidence_copies: int = 1,
 ) -> dict:
     """Assemble the schema-version-1 envelope: budget, conflicts, warnings.
 
@@ -473,7 +502,7 @@ def build_envelope(
     """
     requested = clamp_budget(budget_tokens)
     coverage = coverage or _empty_coverage()
-    kept, used, omitted = fit_budget(units, requested, contiguous=contiguous_budget)
+    kept, used, omitted = fit_budget(units, requested, contiguous=contiguous_budget, copies=evidence_copies)
     notes = list(warnings or [])
 
     if index_state == "stale":
@@ -496,6 +525,12 @@ def build_envelope(
             "Some review threads were only partially fetched "
             f"({nested} thread(s) in the index); an excerpt may be missing later replies."
         )
+    truncated = sorted(
+        (set(coverage.get("truncated_connections") or [])
+         | {c for u in kept for c in u.get("truncated_connections", [])}) - {"pullRequests"}
+    )
+    if truncated:
+        notes.append("GitHub returned incomplete nested connections: " + ", ".join(truncated) + ". Some evidence is missing.")
     if any(u["is_bot"] or u["author_type"] == "bot" for u in kept):
         notes.append("Bot-authored evidence is present in the results; check author_type before treating it as a reviewer's judgement.")
     if omitted:
@@ -520,7 +555,10 @@ def build_envelope(
         "coverage": coverage,
         "results": kept,
         "candidate_conflicts": find_candidate_conflicts(kept, metas or {}),
-        "budget": {"requested_tokens": requested, "used_tokens": used, "omitted_units": omitted},
+        "budget": {
+            "requested_tokens": requested, "used_tokens": used, "omitted_units": omitted,
+            "scope": "evidence_units", "evidence_copies": evidence_copies,
+        },
         "warnings": notes,
         "content_notice": CONTENT_NOTICE,
     }
@@ -528,6 +566,7 @@ def build_envelope(
         envelope["action"] = action
     if stale_reason:
         envelope["stale_reason"] = stale_reason
+    _update_response_estimate(envelope)
     return envelope
 
 
@@ -596,6 +635,7 @@ def _snapshot(repo: str, namespace: str | None, temporary: bool) -> dict:
     }
 
 
+@index_read_session()
 def resolve_scope(repo: str, namespace: str | None, temporary: bool) -> dict:
     """Snapshot the requested scope, falling back to the other storage scope.
 
@@ -664,6 +704,7 @@ def search_evidence(
     exclude_bots: bool = False,
     source_kinds: list[str] | None = None,
     where: dict | None = None,
+    evidence_copies: int = 1,
 ) -> dict:
     """Hybrid (semantic + exact) retrieval wrapped in the evidence envelope."""
     if isinstance(temporary, str):
@@ -686,7 +727,7 @@ def search_evidence(
         return build_envelope(
             repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
             retrieval_mode="none", coverage=coverage, units=[], budget_tokens=budget_tokens,
-            warnings=[message], action=action,
+            warnings=[message], action=action, evidence_copies=evidence_copies,
         )
 
     warnings: list[str] = []
@@ -704,45 +745,69 @@ def search_evidence(
             f"{type(exc).__name__}). Results use lexical matching only and may miss "
             "differently-worded discussions."
         )
-    if embedding is not None:
-        semantic = query_similar(
-            repo, query, n_results=pool, temporary=temporary, namespace=namespace, where=where,
-            over_fetch=OVER_FETCH_FILTERED if filtering else 1,
-            exclude_bots=exclude_bots, source_kinds=source_kinds, query_embedding=embedding,
+    with index_read_session():
+        snap = resolve_scope(repo, namespace, temporary)
+        temporary = snap["temporary"]
+        stats, coverage, state = snap["stats"], snap["coverage"], snap["state"]
+        index_state = snap["index_state"]
+        serving = snap["serving"]
+        generation = stats.get("generation")
+        if not isinstance(generation, int):
+            generation = state.get("serving_generation") or state.get("generation") or coverage.get("generation") or 0
+
+        action = state.get("action")
+        if not serving and index_state in {"no_index", "failed", "indexing"}:
+            message, action = _unavailable(repo, snap, lookup=False)
+            return build_envelope(
+                repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
+                retrieval_mode="none", coverage=coverage, units=[], budget_tokens=budget_tokens,
+                warnings=[message], action=action, evidence_copies=evidence_copies,
+            )
+
+        if embedding is not None:
+            semantic = query_similar(
+                repo, query, n_results=pool, temporary=temporary, namespace=namespace, where=where,
+                over_fetch=OVER_FETCH_FILTERED if filtering else 1,
+                exclude_bots=exclude_bots, source_kinds=source_kinds, query_embedding=embedding,
+            )
+        exact: list[dict] = []
+        try:
+            lexical = lexical_candidates(
+                repo, query, limit=pool, temporary=temporary, namespace=namespace, where=where,
+                exclude_bots=exclude_bots, source_kinds=source_kinds,
+            )
+            exact = lexical if mode == "lexical_degraded" else [h for h in lexical if h.get("match") == "exact"]
+        except Exception as exc:
+            warnings.append(f"Exact/lexical matching failed ({type(exc).__name__}); results rely on semantic ranking only.")
+
+        ranked = _fuse(semantic, exact)[:n_results]
+        units: list[dict] = []
+        metas: dict[str, dict] = {}
+        for hit, score, match in ranked:
+            unit = project_unit(repo, hit, score=score, match=match)
+            units.append(unit)
+            metas[unit["evidence_id"]] = hit.get("metadata") or {}
+
+        envelope = build_envelope(
+            repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
+            retrieval_mode=mode, coverage=coverage, units=units, metas=metas, budget_tokens=budget_tokens,
+            warnings=warnings, stale_reason=state.get("stale_reason"), action=action, evidence_copies=evidence_copies,
         )
-    exact: list[dict] = []
-    try:
-        lexical = lexical_candidates(
-            repo, query, limit=pool, temporary=temporary, namespace=namespace, where=where,
-            exclude_bots=exclude_bots, source_kinds=source_kinds,
-        )
-        exact = lexical if mode == "lexical_degraded" else [h for h in lexical if h.get("match") == "exact"]
-    except Exception as exc:
-        warnings.append(f"Exact/lexical matching failed ({type(exc).__name__}); results rely on semantic ranking only.")
-
-    ranked = _fuse(semantic, exact)[:n_results]
-    units: list[dict] = []
-    metas: dict[str, dict] = {}
-    for hit, score, match in ranked:
-        unit = project_unit(repo, hit, score=score, match=match)
-        units.append(unit)
-        metas[unit["evidence_id"]] = hit.get("metadata") or {}
-
-    envelope = build_envelope(
-        repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
-        retrieval_mode=mode, coverage=coverage, units=units, metas=metas, budget_tokens=budget_tokens,
-        warnings=warnings, stale_reason=state.get("stale_reason"), action=action,
-    )
-    if stats.get("is_stale"):
-        days = stats.get("days_old", 30)
-        legacy = f"Index is {days} days old. We recommend running 'ensure_repo_ready' to refresh patterns."
-        envelope["warning"] = legacy  # legacy single-string key kept for older clients
-        if legacy not in envelope["warnings"] and index_state != "stale":
-            envelope["warnings"].append(legacy)
-    return envelope
+        if stats.get("is_stale"):
+            days = stats.get("days_old", 30)
+            legacy = f"Index is {days} days old. We recommend running 'ensure_repo_ready' to refresh patterns."
+            envelope["warning"] = legacy  # legacy single-string key kept for older clients
+            if legacy not in envelope["warnings"] and index_state != "stale":
+                envelope["warnings"].append(legacy)
+        _update_response_estimate(envelope)
+        return envelope
 
 
-def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_id: str) -> dict:
+@index_read_session()
+def fetch_evidence(
+    repo: str, namespace: str | None, temporary: bool, evidence_id: str,
+    *, part_offset: int = 0, budget_tokens: int = BUDGET_MAX,
+) -> dict:
     """Expand one unit to every part of its thread, wrapped in the envelope.
 
     A direct lookup ranks nothing: ``retrieval_mode`` is ``direct_lookup``, each
@@ -752,6 +817,8 @@ def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_i
     """
     if isinstance(temporary, str):
         temporary = temporary == "temporary"
+    if part_offset < 0:
+        raise ValueError("part_offset must be non-negative")
     snap = resolve_scope(repo, namespace, temporary)
     temporary = snap["temporary"]
     stats, coverage, state = snap["stats"], snap["coverage"], snap["state"]
@@ -762,7 +829,7 @@ def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_i
         message, action = _unavailable(repo, snap, lookup=True)
         return build_envelope(
             repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
-            retrieval_mode="none", coverage=coverage, units=[], budget_tokens=BUDGET_MAX,
+            retrieval_mode="none", coverage=coverage, units=[], budget_tokens=budget_tokens,
             warnings=[message], action=action, lookup=True,
         )
 
@@ -771,19 +838,42 @@ def fetch_evidence(repo: str, namespace: str | None, temporary: bool, evidence_i
         parts = get_documents_by_ids(repo, [evidence_id], temporary=temporary, namespace=namespace)
     units: list[dict] = []
     metas: dict[str, dict] = {}
-    for part in parts:  # get_thread_parts already orders by part_index
+    for part in parts[part_offset:]:  # get_thread_parts already orders by part_index
         unit = project_unit(repo, part, score=None, match="id")
         units.append(unit)
         metas[unit["evidence_id"]] = part.get("metadata") or {}
     warnings: list[str] = []
-    if not units:
+    if not parts:
         warnings.append(f"No evidence unit with id '{evidence_id}' exists in the active generation of this index.")
-    return build_envelope(
+    elif part_offset >= len(parts):
+        warnings.append(f"part_offset={part_offset} is beyond this unit's {len(parts)} parts.")
+    envelope = build_envelope(
         repo=repo, namespace=namespace, generation=int(generation or 0), index_state=index_state,
         retrieval_mode="direct_lookup", coverage=coverage, units=units, metas=metas,
-        budget_tokens=BUDGET_MAX, warnings=warnings, stale_reason=state.get("stale_reason"),
+        budget_tokens=budget_tokens, warnings=warnings, stale_reason=state.get("stale_reason"),
         action=state.get("action"), contiguous_budget=True, lookup=True,
     )
+    next_offset = part_offset + len(envelope["results"])
+    has_more = next_offset < len(parts)
+    envelope["pagination"] = {
+        "part_offset": part_offset, "total_parts": len(parts),
+        "next_part_offset": next_offset if has_more else None,
+        "has_more": has_more,
+    }
+    if has_more and envelope["results"]:
+        envelope["warnings"] = [w for w in envelope["warnings"] if "omitted to fit budget_tokens=" not in w]
+        envelope["warnings"].append(
+            f"More parts are available: call get_evidence with the same evidence_id and part_offset={next_offset}."
+        )
+    elif has_more:
+        required = estimate_tokens(units[0])
+        envelope["pagination"]["next_part_offset"] = None
+        envelope["pagination"]["minimum_budget_tokens"] = required
+        envelope["warnings"].append(
+            f"The next whole part needs budget_tokens >= {required}; retry the same part_offset with a larger budget."
+        )
+    _update_response_estimate(envelope)
+    return envelope
 
 
 # ── tool glue ─────────────────────────────────────────────────────────────────
@@ -818,6 +908,7 @@ async def evidence_response(
         exclude_bots=exclude_bots,
         source_kinds=source_kinds,
         where=where,
+        evidence_copies=2 if legacy_key else 1,
     )
     for key, value in (extra or {}).items():
         envelope[key] = value

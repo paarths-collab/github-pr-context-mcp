@@ -47,16 +47,16 @@ CLIENTS = {
 }
 
 def prompt_config():
-    print("=== GitHub PR Context MCP Server Setup ===")
+    print("=== Legacy indexed GitHub PR Context setup ===")
     
     # Check if running from a git clone
     if os.path.exists(".git"):
         print("\n[!] NOTICE: You are running this setup from a local git clone.")
-        print("    For most users, we recommend: 'pipx install github-pr-context-mcp'")
+        print("    For legacy indexed mode: pipx install 'github-pr-context-mcp[indexed]'")
         print("    This automatically handles absolute paths and simplifies updates.\n")
 
     print("How are you running this MCP Server?")
-    print("1. Local v3 (recommended, free, and private to this machine)")
+    print("1. Legacy indexed mode (stores PR data on this machine)")
     print("2. Remote hosted deployment (not available for public self-service in v0.3)")
     
     choice = input("Select an option [1]: ").strip() or "1"
@@ -72,14 +72,14 @@ def prompt_config():
         # Prefer the actual installed entrypoint. ``pipx install .`` creates an
         # isolated virtual environment, so using this script's interpreter would
         # otherwise make the IDE miss the MCP package and its dependencies.
-        installed_command = shutil.which("github-pr-context-mcp")
+        installed_command = shutil.which("github-pr-context-indexed")
         current_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         if installed_command:
             print(f"Using installed command: {installed_command}")
             mcp_host_config = {"command": installed_command}
         else:
             print("Installed command not found; using this source checkout's Python environment.")
-            print("Install with 'pipx install .' for a portable, isolated command.")
+            print("Install with pipx install '.[indexed]' for a portable, isolated command.")
             mcp_host_config = {
                 "command": sys.executable,
                 "args": [os.path.join(current_dir, "entrypoints", "local", "server.py")],

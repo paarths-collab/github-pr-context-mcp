@@ -1,3 +1,5 @@
+> This document describes legacy indexed mode (`github-pr-context-indexed`, installed with the `indexed` extra). The default workflow now fetches live through the official GitHub MCP; see the project README.
+
 # v0.3 Pure-Context Pipeline
 
 The server retrieves historical evidence. The connected IDE agent turns that evidence into a review, code change, test plan, or instruction file.
@@ -60,7 +62,7 @@ flowchart LR
     C --> D["default 60 PRs"]
     C --> M["max 300 PRs"]
     M --> T["marked truncated_connections"]
-    T --> W["Want deeper history?<br/>delete + rebuild with more pages"]
+    T --> W["Want deeper history?<br/>backfill or backfill_all"]
 
     style W fill:#9d4edd,color:#fff
 ```
@@ -68,8 +70,8 @@ flowchart LR
 A first import that reaches the cap can still finish as `ready`; its evidence
 carries `truncated_connections: ["pullRequests"]` to say older history was never
 fetched. **A refresh looks for newer updates — it will not backfill history
-skipped by the initial cap.** If wider history matters, delete and rebuild with
-a larger page count before relying on the index.
+skipped by the initial cap.** Use `backfill=true` for another chunk or `backfill_all=true` to continue from
+the saved cursor until history is complete or the page budget is reached.
 
 ### Incremental indexing by webhook
 
@@ -137,6 +139,11 @@ and will not overwrite an unrelated nonempty v3 destination. An interrupted
 migration is resumable. Inspect its JSON report for `skipped` and `conflicts`,
 then restart the IDE and verify with `get_index_stats`.
 
+Permanent reads, generation publication and deletion share an interprocess lock in the
+Chroma directory. A search reads coverage and both retrieval paths under one lock;
+model encoding runs before acquiring it. Deletion epochs persist in SQLite so a
+previously started writer cannot recreate a deleted permanent scope.
+
 ## Retrieval and reasoning
 
 ```mermaid
@@ -183,5 +190,10 @@ flowchart LR
 - A historical pattern can become stale; compare it with current code and project instructions.
 - The local embedding model supports semantic search. It does not replace the IDE agent's reasoning model.
 - Two outbound operations are separate from GitHub retrieval: the first index or query lazily downloads the `all-MiniLM-L6-v2` embedding model, and the local launcher runs a background version check at startup.
+
+Evidence budgets limit the estimated serialized evidence payload, including legacy
+copies, using characters/4. Metadata and guidance are extra overhead reported by
+`budget.estimated_response_tokens`. `get_evidence` exposes `pagination`; continue
+with the same `evidence_id` and `part_offset=next_part_offset` for large threads.
 
 Back to [README](../README.md)

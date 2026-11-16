@@ -1,0 +1,11 @@
+interface:
+  display_name: "GitHub PR Context"
+  short_description: "Find PR review evidence live through GitHub MCP."
+  default_prompt: "Use $github-pr-context to find relevant PR history through the official GitHub MCP."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "github"
+      description: "Official GitHub MCP for live PR search and reads"
+      transport: "streamable_http"
+      url: "https://api.githubcopilot.com/mcp/"
