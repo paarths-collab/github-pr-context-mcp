@@ -50,6 +50,8 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 _SNIPPET_CONTROL_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f  ]")
 _LESSON_ID_RE = re.compile(r"L\d{1,6}")
 _CHUNK_ID_RE = re.compile(r"C\d{1,4}")
+_RUN_TAIL_RE = re.compile(r"\d{1,20}(?:/job/\d{1,20})?(?:[?#][A-Za-z0-9\-._~/#?=&%+:@]*)?")
+MAX_CI_NAME = 100
 _PHASES = ("backfill", "ongoing")
 _WEAK_REASON = "review_comment is weak evidence"
 _VERDICTS = ("approve", "edit", "reject")
@@ -203,7 +205,7 @@ def _empty_state(repo):
             "backfill_cursor": None, "newest_processed": None, "processed_count": 0,
             "processed_numbers": [], "next_lesson_id": 1, "next_alert_id": 1, "next_check_id": 1,
             "backfill_completed_at": None, "updated_at": None,
-            "stats": {"discarded": 0, "weak_comments": 0},
+            "stats": {"discarded": 0, "weak_comments": 0, "ci_flaky": 0, "ci_weak": 0},
             "lessons": [], "pending": [], "decided": {}, "alerts": []}
 
 
@@ -372,7 +374,25 @@ def _evidence_of(obs):
         entry["example"] = obs["example"]
     if obs.get("ai_authored"):
         entry["ai_authored"] = True
+    if obs.get("source") == rules.CI_SOURCE:
+        entry.update({key: obs[key] for key in rules.CI_FIELDS})
     return entry
+
+
+def _ci_stats(state):
+    """CI feedback counts: fixed = approved CI evidence in live lessons; flaky and weak are discarded and counted."""
+    stats = state["stats"]
+    return {"fixed": rules.ci_fixed_count(_analyzed(state)), "flaky": stats.get("ci_flaky", 0),
+            "weak": stats.get("ci_weak", 0)}
+
+
+def _by_signature(state, signatures):
+    """First lesson with approved CI evidence of one of these (normalised) failure signatures."""
+    wanted = {s for s in signatures if s}
+    if not wanted:
+        return None
+    return next((x for x in state["lessons"]
+                 if any(e.get("failure_signature") in wanted for e in rules.all_evidence(x))), None)
 
 
 def _add_evidence(lesson, entry):
@@ -423,6 +443,7 @@ def _public_evidence(entry, with_example=True):
         out["example"] = entry["example"]
     if entry.get("ai_authored"):
         out["ai_authored"] = True
+    out.update({key: entry[key] for key in rules.CI_FIELDS if key in entry})
     return out
 
 
@@ -531,6 +552,10 @@ def render_markdown(state):
         lines.append(f"- {lesson['id']}: {escape_markdown(lesson['rule'])} (last evidence {info['newest_evidence']})")
     lines.extend(["", f"Discarded observations: {stats['discarded']}. Weak review comments (counted only): "
                       f"{stats['weak_comments']}.", ""])
+    ci = _ci_stats(state)
+    if any(ci.values()):
+        lines.extend([f"CI failures: {ci['fixed']} fixed (evidence), {ci['flaky']} flaky (discarded), "
+                      f"{ci['weak']} without a fix (discarded).", ""])
     return "\n".join(lines)
 
 
@@ -625,6 +650,7 @@ class LessonStore:
             "discarded": state["stats"]["discarded"],
             "weak_comments": state["stats"]["weak_comments"],
             "open_alerts": sum(1 for a in state["alerts"] if not a["acknowledged"]),
+            "ci": _ci_stats(state),
             "families": rules.family_stats(_analyzed(state)),
             "self_check": _self_check_totals(state),
             "next_search_query": query,
@@ -1104,7 +1130,8 @@ class LessonStore:
 
     # -- observation handling (model's labels, code's rules) -------------
     def _discard(self, state, obs, reason, result, weak=False):
-        state["stats"]["weak_comments" if weak else "discarded"] += 1
+        bucket = obs.get("discard_stat") or ("weak_comments" if weak else "discarded")
+        state["stats"][bucket] = state["stats"].get(bucket, 0) + 1
         result["discarded"].append({"pr": obs["pr"], "kind": obs["kind"], "reason": reason, "rule": obs["rule"][:80]})
 
     def _apply_observation(self, state, obs, result):
@@ -1124,6 +1151,8 @@ class LessonStore:
                 return self._discard(state, obs, f"unknown or removed lesson {obs['lesson_id']}", result)
         else:
             lesson = _resolve(state, next((x for x in state["lessons"] if _norm_rule(x["rule"]) == norm), None))
+            if lesson is None and obs.get("failure_signature"):  # the same CI failure is the same lesson
+                lesson = _resolve(state, _by_signature(state, [obs["failure_signature"]]))
             if lesson is not None and lesson["removed"]:
                 result["suppressed"].append({"lesson_id": lesson["id"], "reason": "previously removed"})
                 return None
@@ -1173,8 +1202,11 @@ class LessonStore:
             return None
         for pending in state["pending"]:
             if ctype in _RULE_CHECKS:  # same proposed text: further PRs are more evidence
+                signature = check["evidence"][0].get("failure_signature")
                 same_claim = (pending["type"] == ctype and pending["lesson_id"] == lesson_id
-                              and pending["norm"] == check["norm"])
+                              and (pending["norm"] == check["norm"]
+                                   or bool(signature and any(e.get("failure_signature") == signature
+                                                             for e in pending["evidence"]))))
             else:  # repeat / family repeat / contradiction: one claim per PR
                 same_claim = (pending["type"] == ctype and pending["lesson_id"] == lesson_id
                               and pending.get("family") == check["family"]
@@ -1382,6 +1414,8 @@ class LessonStore:
         rule = final["rule"]
         norm = _norm_rule(rule)
         existing = _resolve(state, next((x for x in state["lessons"] if _norm_rule(x["rule"]) == norm), None))
+        if existing is None:  # an approved CI lesson with the same failure signature
+            existing = _resolve(state, _by_signature(state, [e.get("failure_signature") for e in check["evidence"]]))
         if existing is not None and existing["removed"]:
             result["suppressed"].append({"lesson_id": existing["id"], "reason": "previously removed"})
             return
@@ -1487,6 +1521,46 @@ class LessonStore:
             raise LessonError(f"{field} does not point at PR #{pr}")
         return value
 
+    def _check_run_url(self, value):
+        """A GitHub Actions run (or job) page of THIS repo: .../actions/runs/<id>[/job/<id>]."""
+        prefix = f"https://github.com/{self.repo}/actions/runs/"
+        if not isinstance(value, str) or len(value) > 300 or value[:len(prefix)].lower() != prefix:
+            raise LessonError(f"run_url must be a https://github.com/{self.repo}/actions/runs/<id> URL")
+        if not _RUN_TAIL_RE.fullmatch(value[len(prefix):]):
+            raise LessonError("run_url must end in runs/<id> or runs/<id>/job/<id>")
+        return value
+
+    def _ci_fields(self, item):
+        """Source and CI fields of an observation; the failure signature is normalised by code."""
+        signature = rules.normalise_failure_signature(clean_text(item.get("failure_signature"), "failure_signature",
+                                                                 rules.MAX_SIGNATURE, required=False))
+        fields = {"source": rules.CI_SOURCE, "failure_signature": signature,
+                  "workflow": clean_text(item.get("workflow"), "workflow", MAX_CI_NAME, required=False),
+                  "job": clean_text(item.get("job"), "job", MAX_CI_NAME, required=False), "run_url": "",
+                  "run_url_error": None}
+        try:
+            fields["run_url"] = self._check_run_url(item.get("run_url"))
+        except LessonError as error:
+            fields["run_url_error"] = str(error)
+        return fields
+
+    @staticmethod
+    def _ci_discard(obs):
+        """Code-enforced CI rules. Flaky and unfixed failures only feed the stats; a fixed failure needs a
+        failure signature, a run link in this repo and the key log line. Reviewer rules do not apply."""
+        if obs["kind"] == "ci_flaky":
+            obs["discard"], obs["discard_stat"] = "flaky CI failure: passed on re-run with no code change", "ci_flaky"
+        elif obs["kind"] == "ci_failure":
+            obs["discard"], obs["discard_stat"] = "ci_failure without a later fix is weak evidence (counted in stats only)", "ci_weak"
+        elif obs["discard"]:
+            return
+        elif not obs["failure_signature"]:
+            obs["discard"] = "missing failure_signature"
+        elif obs["run_url_error"]:
+            obs["discard"] = obs["run_url_error"]
+        elif not obs["quote"]:
+            obs["discard"] = "missing quote (the key log line)"
+
     def _check_pr(self, item):
         item = _mapping(item, "processed_prs item")
         number = _positive_int(item.get("number"), "number")
@@ -1526,7 +1600,10 @@ class LessonStore:
         merge_with = item.get("merge_with", [])
         if not isinstance(merge_with, list) or len(merge_with) > MAX_MERGE_LESSONS:
             raise LessonError(f"merge_with must be a list of at most {MAX_MERGE_LESSONS} lesson ids")
-        people_required = not legacy
+        is_ci = kind in rules.CI_KINDS
+        if item.get("source") not in (None, rules.CI_SOURCE if is_ci else None):
+            raise LessonError(f"source must be {rules.CI_SOURCE!r} for CI kinds and omitted otherwise")
+        people_required = not legacy and not is_ci  # CI observations have no reviewer
         obs = {"pr": pr, "kind": kind, "legacy": legacy, "discard": None,
                "date": _date(item.get("date"), "date"),
                "reviewer": clean_text(item.get("reviewer"), "reviewer", MAX_LOGIN, required=people_required),
@@ -1534,7 +1611,8 @@ class LessonStore:
                "paths": sorted({p for p in map(rules.normalise_path, paths) if p}),
                # A repeat of a named lesson or of a family restates no rule of its own.
                "rule": clean_text(item.get("rule"), "rule", MAX_RULE,
-                                  required=not legacy and not family_repeat and item.get("lesson_id") is None),
+                                  required=not legacy and not family_repeat and item.get("lesson_id") is None
+                                  and kind not in ("ci_flaky", "ci_failure")),
                "why": clean_text(item.get("why"), "why", MAX_WHY, required=False),
                "category": clean_text(item.get("category"), "category", MAX_CATEGORY, required=False).lower() or "general",
                "quote": clean_text(item.get("quote"), "quote", MAX_QUOTE, required=False),
@@ -1546,6 +1624,8 @@ class LessonStore:
         for field in ("lesson_id", "contradicts"):
             if item.get(field) is not None:
                 obs[field] = _lesson_id(item[field], field)
+        if is_ci:
+            obs.update(self._ci_fields(item))
         try:
             obs["url"] = self._check_url(item.get("url"), "url", pr)
         except LessonError as error:
@@ -1553,7 +1633,9 @@ class LessonStore:
                 raise
             obs["url"], obs["discard"] = "", str(error)
         reviewer, author = obs["reviewer"].lower(), obs["author"].lower()
-        if not obs["discard"]:
+        if is_ci:
+            self._ci_discard(obs)
+        elif not obs["discard"]:
             if kind == "review_comment":
                 obs["discard"] = _WEAK_REASON + " (counted in stats only)"
             elif reviewer and reviewer == author:

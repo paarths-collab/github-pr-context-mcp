@@ -9,10 +9,17 @@ so the same state always yields the same levels and scores (also while backfilli
 
 from datetime import datetime
 import json
+import re
 
-KIND_RANK = {"change_request_fixed": 1, "follow_up_fix": 2, "revert": 3}
-OBSERVATION_KINDS = ("revert", "follow_up_fix", "change_request_fixed", "review_comment")
+KIND_RANK = {"change_request_fixed": 1, "follow_up_fix": 2, "revert": 3, "ci_failure_fixed": 2}
+# CI failures are a second feedback source. Only ci_failure_fixed is evidence (as strong as a follow-up
+# fix); ci_flaky and a plain ci_failure are discarded and only counted, so they have no rank.
+CI_KINDS = ("ci_failure_fixed", "ci_flaky", "ci_failure")
+OBSERVATION_KINDS = ("revert", "follow_up_fix", "change_request_fixed", "review_comment") + CI_KINDS
 BOT_OK_KINDS = ("revert", "follow_up_fix")
+CI_SOURCE = "ci"
+CI_FIELDS = ("source", "workflow", "job", "failure_signature", "run_url")
+MAX_SIGNATURE = 200
 
 ARCHIVE_AFTER_DAYS = 365
 ACTIVE_MIN_PRS = 2
@@ -147,7 +154,9 @@ def analyze(lesson, clock):
     else:
         status = "candidate"
 
-    kind = "team" if len(reviewers) >= TEAM_MIN_REVIEWERS else "preference"
+    # A failing CI job is not one person's taste: CI evidence in 2 distinct PRs also makes a team rule.
+    ci_prs = len({item["pr"] for item in items if item.get("source") == CI_SOURCE})
+    kind = "team" if len(reviewers) >= TEAM_MIN_REVIEWERS or ci_prs >= ACTIVE_MIN_PRS else "preference"
     weights = SCORE_WEIGHTS
     raw = (weights["revert"] * count[3] + weights["follow_up_fix"] * count[2]
            + weights["change_request_fixed"] * count[1] + weights["reviewer"] * len(reviewers)
@@ -173,6 +182,40 @@ def latest_example(lesson):
         if item.get("example"):
             return item["example"]
     return None
+
+
+# -- CI failures --------------------------------------------------------------
+_SIG_UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
+_SIG_HEX_RE = re.compile(r"\b0x[0-9a-f]+\b")
+_SIG_HASH_RE = re.compile(r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,64}\b")
+_SIG_RUNNER_RE = re.compile(r"(?:/home/runner/work|/github/workspace|[a-z]:[\\/]a)[\\/][^\\/\s]+[\\/][^\\/\s]+[\\/]?")
+_SIG_TMP_RE = re.compile(r"(?:/private)?/(?:tmp|var/folders|var/tmp)/\S*|[a-z]:[\\/]\S*[\\/]temp[\\/]\S*")
+_SIG_DIGITS_RE = re.compile(r"\d+")
+
+
+def normalise_failure_signature(value):
+    """Short, stable identifier of a CI failure, so the same failure matches across runs and PRs.
+
+    Lower-cased, whitespace collapsed; runner checkout prefixes dropped; temp paths, UUIDs, hashes and hex
+    addresses replaced by placeholders; every number (line numbers, durations, counts) becomes N. Returns ''
+    for non-strings and for text with no letters left.
+    """
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.lower().split())
+    text = _SIG_RUNNER_RE.sub("", text)
+    text = _SIG_TMP_RE.sub("<tmp>", text)
+    text = _SIG_UUID_RE.sub("<id>", text)
+    text = _SIG_HEX_RE.sub("<hex>", text)
+    text = _SIG_HASH_RE.sub("<hash>", text)
+    text = _SIG_DIGITS_RE.sub("N", text)
+    text = text[:MAX_SIGNATURE].strip()
+    return text if re.search(r"[a-z]", re.sub(r"<[a-z]+>", "", text)) else ""
+
+
+def ci_fixed_count(items):
+    """Approved CI evidence items across (lesson, info) pairs of live lessons."""
+    return sum(1 for lesson, _ in items for e in all_evidence(lesson) if e.get("source") == CI_SOURCE)
 
 
 # -- families ----------------------------------------------------------------
