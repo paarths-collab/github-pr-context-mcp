@@ -30,6 +30,43 @@ EXPORT_MAX_LESSONS = 30
 
 _STATUS_ORDER = {"hardened": 0, "active": 1, "candidate": 2, "archived": 3}
 
+# Mistake families: a small fixed taxonomy so "the same kind of mistake" can be recognised across
+# folders (a missing timeout on an HTTP call and on a DB call are both "missing-timeout"). The model
+# labels a family, the checker verifies it, code only stores and counts. Order is display order.
+OTHER_FAMILY = "other"
+FAMILIES = {
+    "missing-timeout": "outbound calls (HTTP, database, RPC, subprocess) made without a timeout",
+    "blocking-io": "blocking or synchronous work on a hot path, an event loop or a UI thread",
+    "resource-leak": "files, connections, locks, threads or memory that are not released or closed",
+    "error-handling": "errors swallowed, wrong exceptions, missing retries, fallbacks or cleanup",
+    "concurrency": "races, missing locks, shared mutable state or non-atomic updates",
+    "input-validation": "untrusted or malformed input that is not validated, bounded or sanitised",
+    "security": "secrets, authentication, authorisation, injection or other security weaknesses",
+    "api-misuse": "a library, framework or internal API used against its contract",
+    "performance": "needless work such as N+1 queries, repeated calls or unbounded loops and buffers",
+    "data-integrity": "data loss, corruption, inconsistent state or unsafe migrations",
+    "naming-and-style": "naming, formatting, structure and readability conventions",
+    "tests": "missing, weak, flaky or misplaced tests",
+    "docs-and-changelog": "missing or outdated documentation, comments or changelog entries",
+    "config-and-deps": "configuration, environment, build or dependency problems",
+    OTHER_FAMILY: "anything that fits none of the families above",
+}
+SERVE_MAX_FAMILIES = len(FAMILIES)
+
+
+def normalise_family(value):
+    """Family name from model or checker text; anything unknown (or not a string) becomes 'other'."""
+    if isinstance(value, str):
+        key = "-".join(value.lower().replace("_", " ").split())
+        if key in FAMILIES:
+            return key
+    return OTHER_FAMILY
+
+
+def list_families():
+    return [{"name": name, "description": description} for name, description in FAMILIES.items()]
+
+
 # Mirrors storage.document_builder._login_is_bot. Not imported: the default runtime must not
 # pull in the indexed storage package (tests/test_live_workflow.py enforces that).
 _KNOWN_BOT_LOGINS = {"github-actions", "dependabot", "vercel"}
@@ -101,6 +138,8 @@ def analyze(lesson, clock):
 
     if lesson["removed"]:
         status = "removed"
+    elif lesson.get("merged_into"):
+        status = "merged"
     elif lesson["archived_by_conflict"] or age_days > ARCHIVE_AFTER_DAYS:
         status = "archived"
     elif len(strongest) >= ACTIVE_MIN_PRS or count[3] or lesson["manual_active"]:
@@ -136,12 +175,71 @@ def latest_example(lesson):
     return None
 
 
+# -- families ----------------------------------------------------------------
+def family_of(lesson):
+    return lesson.get("family") or OTHER_FAMILY
+
+
+def principle_of(lesson):
+    return lesson.get("principle") or lesson["rule"]
+
+
+def family_stats(items):
+    """Per family: active/hardened lessons, hardened lessons, approved repeats, newest repeat date.
+
+    items are (lesson, info) pairs of live lessons. Families with nothing to report are left out;
+    the order is the taxonomy order.
+    """
+    table = {name: {"family": name, "description": FAMILIES[name], "lessons": 0, "hardened": 0,
+                    "repeats": 0, "last_repeat": None} for name in FAMILIES}
+    for lesson, info in items:
+        row = table[family_of(lesson) if family_of(lesson) in FAMILIES else OTHER_FAMILY]
+        if info["status"] in ("active", "hardened"):
+            row["lessons"] += 1
+        if info["status"] == "hardened":
+            row["hardened"] += 1
+        row["repeats"] += info["repeat_count"]
+        dates = [item["date"] for item in lesson["repeats"]]
+        if dates and (row["last_repeat"] is None or max(dates) > row["last_repeat"]):
+            row["last_repeat"] = max(dates)
+    return [row for row in table.values() if row["lessons"] or row["repeats"]]
+
+
 # -- serving -----------------------------------------------------------------
-def compact(lesson, info):
-    """Small form served to the agent; the example is added separately if the budget allows."""
-    return {"id": lesson["id"], "rule": lesson["rule"], "why": lesson["why"][:SERVE_WHY_CHARS],
-            "status": info["status"], "kind": info["kind"], "score": info["score"],
-            "link": best_link(lesson)}
+def match_basis(scope, path_dirs, family, families):
+    """Why a lesson is served: 'global' (applies everywhere), 'path' (folder match), 'family' or None."""
+    if scope["global"] or scope["unscoped"]:
+        return "global"
+    if scope_matches(scope, path_dirs):
+        return "path"
+    return "family" if family in families else None
+
+
+def serve_key(lesson, info, basis):
+    """Hardened first, then folder (or global) matches before family-only matches, then score."""
+    return (info["status"] != "hardened", basis == "family", -info["score"], int(lesson["id"][1:]))
+
+
+def compact(lesson, info, matched_by=None):
+    """Small form served to the agent: the principle first; the specific rule and example are added
+    separately, only if the budget allows."""
+    entry = {"id": lesson["id"], "principle": principle_of(lesson), "family": family_of(lesson),
+             "why": lesson["why"][:SERVE_WHY_CHARS], "status": info["status"], "kind": info["kind"],
+             "score": info["score"], "link": best_link(lesson)}
+    if matched_by:
+        entry["matched_by"] = matched_by
+    return entry
+
+
+def extras_of(lesson):
+    """Optional fields in priority order: the specific rule (unless it is the principle), then the example."""
+    extras = {}
+    if lesson["rule"] != principle_of(lesson):
+        extras["rule"] = lesson["rule"]
+    example = latest_example(lesson)
+    if example:
+        extras["example"] = example
+    return extras
 
 
 def _size(entry):
@@ -149,22 +247,24 @@ def _size(entry):
 
 
 def serve(entries, limit, budget_tokens=SERVE_TOKEN_BUDGET):
-    """Take entries (compact dict, example or None) in rank order within limit and token budget.
+    """Take entries (compact dict, extras dict) in rank order within limit and token budget.
 
-    Rank order is kept: the first entry that does not fit stops the list. Examples are added
-    afterwards, best-ranked first, only while they still fit. Tokens are estimated as chars/4.
+    Rank order is kept: the first entry that does not fit stops the list. Extras (the specific rule,
+    then the example) are added afterwards, best-ranked first, only while they still fit, so the
+    principle wins when the budget is tight. Tokens are estimated as chars/4.
     """
     budget = budget_tokens * 4
     chosen, used = [], 0
-    for entry, example in entries[:limit]:
+    for entry, extras in entries[:limit]:
         if used + _size(entry) > budget:
             break
-        chosen.append([dict(entry), example])
+        chosen.append([dict(entry), extras])
         used += _size(entry)
-    for pair in chosen:
-        if pair[1]:
-            extra = _size({**pair[0], "example": pair[1]}) - _size(pair[0])
-            if used + extra <= budget:
-                pair[0]["example"] = pair[1]
-                used += extra
+    for field in ("rule", "example"):
+        for pair in chosen:
+            if pair[1].get(field):
+                extra = _size({**pair[0], field: pair[1][field]}) - _size(pair[0])
+                if used + extra <= budget:
+                    pair[0][field] = pair[1][field]
+                    used += extra
     return [pair[0] for pair in chosen], used // 4

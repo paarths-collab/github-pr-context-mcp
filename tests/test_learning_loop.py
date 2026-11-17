@@ -86,7 +86,7 @@ def test_new_lesson_rendering(store):
     assert "### L1" in text and "Never retry non-idempotent calls" in text
     assert f"[#3]({BASE}/pull/3#discussion_r1) (2024-01-03)" in text
     state = json.loads((store.dir / "state.json").read_text())
-    assert state["schema_version"] == 2 and state["repo"] == REPO and state["lessons"][0]["repeats"] == []
+    assert state["schema_version"] == 3 and state["repo"] == REPO and state["lessons"][0]["repeats"] == []
     assert not list(store.dir.glob("*.tmp"))
 
 
@@ -181,7 +181,7 @@ def test_untrusted_markdown_is_neutralised(store):
     assert "<script>" not in text and "<b>" not in text and "\x1b" not in text
     assert "&lt;script&gt;" in text and "\\[x\\]" in text and "\\`rm -rf\\`" in text
     headings = [line for line in text.splitlines() if line.startswith("#")]
-    assert headings == ["# Lessons for acme/widgets", "## Must not repeat", "## Rules", "### L1",
+    assert headings == ["# Lessons for acme/widgets", "## Mistake families", "## Must not repeat", "## Rules", "### L1",
                         "## Candidates (not yet rules)", "## Pending checks", "## Archived"]
 
 

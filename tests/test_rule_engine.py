@@ -463,7 +463,9 @@ def test_compact_shape_and_best_link(store):
           obs(4, kind="follow_up_fix", date="2024-02-01"), obs(5, kind="revert", quote="", date="2024-01-01"),
           obs(6, kind="follow_up_fix", date="2024-03-01"))
     entry = store.get_relevant_lessons(["src/api/z.py"])["lessons"][0]
-    assert set(entry) == {"id", "rule", "why", "status", "kind", "score", "link"}
+    # The principle is served; the specific rule only when it differs from the principle (here it does not).
+    assert set(entry) == {"id", "principle", "family", "why", "status", "kind", "score", "link", "matched_by"}
+    assert entry["principle"] == RULE and entry["family"] == "other" and entry["matched_by"] == "path"
     assert len(entry["why"]) == 160 and entry["status"] == "active" and entry["kind"] == "preference"
     assert entry["link"] == f"{BASE}/pull/5#discussion_r1"  # revert beats newer fixes
     store.remove_lesson("L1", "x")
@@ -508,7 +510,7 @@ def test_lessons_md_sections_and_counts(store):
     rec(store, obs(1, kind="review_comment"), obs(2, reviewer="bob"), repeat_obs(30))
     text = (store.dir / "LESSONS.md").read_text()
     headings = [line for line in text.splitlines() if line.startswith("## ")]
-    assert headings == ["## Must not repeat", "## Rules", "## Candidates (not yet rules)", "## Pending checks",
+    assert headings == ["## Mistake families", "## Must not repeat", "## Rules", "## Candidates (not yet rules)", "## Pending checks",
                         "## Archived"]
     assert "### L2" in text.split("## Candidates")[1] and "not yet a rule" in text
     assert "1 pending check(s)" in text and "Discarded observations: 1. Weak review comments (counted only): 1." in text
@@ -583,7 +585,7 @@ def test_export_flag_works_on_the_old_command_name_and_reports_errors(tmp_path, 
         live.main()
 
 
-# -- state schema 2 and migration from v1 --------------------------------------------------
+# -- state schema 3 and migration from v1 --------------------------------------------------
 def v1_state():
     def ev(number, note):
         return {"pr": number, "url": f"{BASE}/pull/{number}", "date": "2024-01-03", "note": note}
@@ -618,7 +620,7 @@ def test_v1_state_migrates_and_levels_are_recomputed(store):
     assert json.loads(store.state_path.read_text())["schema_version"] == 1  # reads never rewrite
     store.acknowledge_alert("A1")
     state = json.loads(store.state_path.read_text())
-    assert state["schema_version"] == 2 and state["pending"] == [] and state["stats"]["discarded"] == 0
+    assert state["schema_version"] == 3 and state["pending"] == [] and state["stats"]["discarded"] == 0
     assert next(x for x in state["lessons"] if x["id"] == "L3")["removed"] is True
     assert "## Candidates (not yet rules)" in (store.dir / "LESSONS.md").read_text()
     assert store.record([], [{"rule": "x", "why": "y", "evidence": []}], [])["rejected"]
@@ -626,7 +628,7 @@ def test_v1_state_migrates_and_levels_are_recomputed(store):
 
 def test_unknown_schema_is_refused(store):
     store.dir.mkdir(parents=True)
-    store.state_path.write_text(json.dumps({**v1_state(), "schema_version": 3}))
+    store.state_path.write_text(json.dumps({**v1_state(), "schema_version": 4}))
     with pytest.raises(LessonError):
         store.status()
 

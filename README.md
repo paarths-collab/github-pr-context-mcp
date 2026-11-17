@@ -28,7 +28,7 @@ flowchart LR
     B --> C["Check<br/>a second pass verifies each rule"]
     C --> D["Rules<br/>scored, with PR links"]
     D --> E["Before coding<br/>only the relevant rules"]
-    D --> F["Repeat detected<br/>alert: 'this happened again'"]
+    D --> F["Repeat detected<br/>alert: 'this kind of mistake happened again'"]
 ```
 
 ## How it works
@@ -41,12 +41,14 @@ flowchart LR
    | --- | --- | --- |
    | Candidate | seen once | no |
    | **Rule** | seen in 2 different PRs, or reverted once | yes |
-   | **Must not repeat** | it happened again after becoming a rule | yes, first — and you get an alert |
+   | **Must not repeat** | the same kind of mistake happened again after it became a rule | yes, first — and you get an alert |
    | Archived | no new evidence for a year | no |
 
    Plain opinions, self-reviews and bot comments are ignored. Rules raised by only one reviewer are marked as *reviewer preference*.
-4. **Use the right rules.** Before coding, the assistant asks for rules about the files it is about to change — at most 8, strongest first, each with a link to the PR it came from.
+4. **Use the right rules.** Before coding, the assistant names the kinds of mistake its change involves and asks for the rules about its files and those kinds — at most 8, strongest first, each with a link to the PR it came from.
 5. **Keep learning.** New PRs are processed the same way. If a known mistake shows up again, the rule gets stronger and you see: *"This type of mistake happened again (lesson L3, PR #57) — you may want to look at it."*
+
+**Same kind of mistake, not just the same one.** Every rule has a general *principle* ("every outbound call needs a timeout") next to the specific case it came from, and belongs to one *mistake family* from a small fixed list (such as `missing-timeout` or `resource-leak`). So a missing timeout on a database call counts as the same kind of mistake as one on an HTTP call, even in another folder, and the rule is shown for both. See [how it works](docs/how-rules-work.md#mistake-families).
 
 ## Quick start
 
