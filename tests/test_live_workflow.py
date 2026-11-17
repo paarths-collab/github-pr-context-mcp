@@ -58,11 +58,11 @@ def test_live_stdio_prompt_and_resource_without_storage(tmp_path):
                                  'acknowledge_alert', 'remove_lesson', 'list_pending_checks', 'submit_checks',
                                  'get_relevant_lessons', 'list_candidates', 'approve_lesson', 'resolve_conflict',
                                  'list_families', 'propose_merge', 'plan_backfill', 'claim_chunk',
-                                 'backfill_progress'}
+                                 'backfill_progress', 'record_self_check'}
                 prompts = await session.list_prompts()
                 assert {p.name for p in prompts.prompts} == {
                     'find_pr_context', 'learn_from_prs', 'check_lessons_before_change', 'check_pending_rules',
-                    'learn_history_parallel', 'learn_history_chunk'}
+                    'learn_history_parallel', 'learn_history_chunk', 'self_check_before_finishing'}
                 learn = await session.get_prompt('learn_from_prs', {'repo': 'example/project'})
                 assert 'record_learning' in learn.messages[0].content.text
                 assert 'example/project' in learn.messages[0].content.text

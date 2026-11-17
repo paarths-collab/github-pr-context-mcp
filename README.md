@@ -70,7 +70,7 @@ pipx install git+https://github.com/paarths-collab/pitfall
 
 **3. Teach it your repo.** Run the prompt `learn_from_prs` with `repo: owner/name`. Repeat until it says it is caught up (or schedule it daily). For a big backlog, `learn_history_parallel` splits old PRs across helper agents.
 
-**4. Code as usual.** Before a change, run `check_lessons_before_change` — or let your agent follow the [skill](.agents/skills/github-pr-context/SKILL.md). It tells you which rules it applied.
+**4. Code as usual.** Before a change, run `check_lessons_before_change` — or let your agent follow the [skill](.agents/skills/github-pr-context/SKILL.md). It tells you which rules it applied, and `self_check_before_finishing` has it re-check its own diff against them before handing over.
 
 ## See your rules
 

@@ -55,6 +55,9 @@ _WEAK_REASON = "review_comment is weak evidence"
 _VERDICTS = ("approve", "edit", "reject")
 _RULE_CHECKS = ("new_lesson", "rule_edit")
 _SERVED = ("active", "hardened")
+# Per-lesson credit counters (stored lazily under lesson["credit"]; missing means zero).
+_CREDIT_FIELDS = ("served", "checked", "caught_by_self_check", "fixed", "ai_misses")
+STRONGER_WORDING_MISSES = 2
 
 
 class LessonError(ValueError):
@@ -305,6 +308,30 @@ def _resolve(state, lesson):
     return lesson
 
 
+def _credit(lesson):
+    """Credit counters of a lesson with safe defaults (older state files have none)."""
+    stored = lesson.get("credit")
+    stored = stored if isinstance(stored, dict) else {}
+    return {field: stored[field] if isinstance(stored.get(field), int) and stored[field] > 0 else 0
+            for field in _CREDIT_FIELDS}
+
+
+def _bump(lesson, field, amount=1):
+    if amount:
+        lesson.setdefault("credit", {})[field] = _credit(lesson)[field] + amount
+
+
+def _needs_stronger_wording(lesson):
+    """The AI repeated this lesson's mistake often enough that the checker may sharpen its principle."""
+    return _credit(lesson)["ai_misses"] >= STRONGER_WORDING_MISSES
+
+
+def _self_check_totals(state):
+    own = state.get("self_check")
+    runs = own.get("runs", 0) if isinstance(own, dict) and isinstance(own.get("runs"), int) else 0
+    return {"runs": runs, **{field: sum(_credit(x)[field] for x in state["lessons"]) for field in _CREDIT_FIELDS}}
+
+
 def _requested_families(value):
     """Validate the families argument of get_relevant_lessons: (known family names, ignored names)."""
     if value is None:
@@ -343,6 +370,8 @@ def _evidence_of(obs):
     entry = {key: obs[key] for key in ("pr", "url", "date", "kind", "reviewer", "author", "paths", "quote")}
     if obs["example"]:
         entry["example"] = obs["example"]
+    if obs.get("ai_authored"):
+        entry["ai_authored"] = True
     return entry
 
 
@@ -392,6 +421,8 @@ def _public_evidence(entry, with_example=True):
     out = {key: entry[key] for key in keys}
     if with_example and entry.get("example"):
         out["example"] = entry["example"]
+    if entry.get("ai_authored"):
+        out["ai_authored"] = True
     return out
 
 
@@ -402,7 +433,8 @@ def _public_lesson(lesson, info, pending):
             "family": rules.family_of(lesson), "merged_from": list(lesson.get("merged_from") or []),
             "category": lesson["category"], "why": lesson["why"], "status": info["status"], "kind": info["kind"], "score": info["score"], "scope": info["scope"],
             "repeat_count": info["repeat_count"], "hardened": info["status"] == "hardened",
-            "evidence": evidence,
+            "evidence": evidence, "stats": _credit(lesson),
+            "needs_stronger_wording": _needs_stronger_wording(lesson),
             "pending": [{"check_id": c["id"], "type": c["type"]} for c in pending
                         if lesson["id"] in _check_lesson_ids(c)]}
 
@@ -445,6 +477,12 @@ def render_markdown(state):
         "",
     ]
 
+    totals = _self_check_totals(state)
+    if totals["runs"]:
+        lines.extend([f"Self-check: {totals['runs']} run(s), {totals['checked']} rule check(s), "
+                      f"{totals['caught_by_self_check']} violation(s) caught, {totals['fixed']} fixed. "
+                      f"The AI repeated a known kind of mistake {totals['ai_misses']} time(s).", ""])
+
     stats_rows = rules.family_stats(analyzed)
     if stats_rows:
         lines.extend(["## Mistake families", "",
@@ -470,6 +508,13 @@ def render_markdown(state):
             scope = escape_markdown(_scope_label(info["scope"]))
             note = " (not yet a rule: needs a second PR, a revert or manual approval)" if candidate else ""
             lines.append(f"- Level: {_kind_label(info)}, score {info['score']}, scope {scope}{note}")
+            credit = _credit(lesson)
+            if any(credit.values()):
+                lines.append(f"- Stats: served {credit['served']}, checked {credit['checked']}, caught by self-check "
+                             f"{credit['caught_by_self_check']}, fixed {credit['fixed']}, AI repeats {credit['ai_misses']}")
+            if _needs_stronger_wording(lesson):
+                lines.append("- Needs stronger wording: the AI repeated this kind of mistake despite the lesson; "
+                             "the checker may sharpen its principle.")
             lines.append(f"- Evidence: {_evidence_links(lesson)}")
             lines.append("")
 
@@ -581,6 +626,7 @@ class LessonStore:
             "weak_comments": state["stats"]["weak_comments"],
             "open_alerts": sum(1 for a in state["alerts"] if not a["acknowledged"]),
             "families": rules.family_stats(_analyzed(state)),
+            "self_check": _self_check_totals(state),
             "next_search_query": query,
             "batch_size": batch_size,
             "notes": ["Search sorted by creation date, oldest first; take the first batch_size results "
@@ -598,7 +644,7 @@ class LessonStore:
         ordered = sorted(_analyzed(state), key=lambda x: rules.sort_key(*x))
         return {"repo": self.repo, "phase": state["phase"],
                 "lessons": [_public_lesson(lesson, info, state["pending"]) for lesson, info in ordered],
-                "families": rules.family_stats(ordered),
+                "families": rules.family_stats(ordered), "self_check": _self_check_totals(state),
                 "merged": [{"id": x["id"], "into": x["merged_into"]} for x in state["lessons"]
                            if x.get("merged_into") and not x["removed"]],
                 "pending_checks": len(state["pending"]),
@@ -630,6 +676,7 @@ class LessonStore:
         matched.sort(key=lambda x: rules.serve_key(*x))
         entries = [(rules.compact(lesson, info, basis), rules.extras_of(lesson)) for lesson, info, basis in matched]
         served, tokens = rules.serve(entries, limit)
+        self._count_served([x["id"] for x in served])
         result = {"repo": self.repo, "lessons": served, "matched": len(matched), "omitted": len(matched) - len(served),
                   "limit": limit, "families": sorted(wanted, key=list(rules.FAMILIES).index),
                   "approx_tokens": tokens, "token_budget": rules.SERVE_TOKEN_BUDGET,
@@ -640,6 +687,94 @@ class LessonStore:
         if unknown:
             result["unknown_families"] = unknown
         return result
+
+    def _count_served(self, lesson_ids):
+        """Cheap counter: how often each lesson was handed to an agent (written only when something was served)."""
+        if not lesson_ids:
+            return
+        with _exclusive_lock(self.dir):
+            state = self.load()
+            for lesson_id in lesson_ids:
+                lesson = _find(state, lesson_id)
+                if lesson is not None:
+                    _bump(lesson, "served")
+            self._save(state)
+
+    def record_self_check(self, paths, checked, violations=()):
+        """Credit a self-check: which lessons the agent compared its finished change against and what it fixed.
+
+        Unknown or removed ids are reported, not fatal. Notes are validated but never stored, and the
+        summary is built only from lesson ids, taxonomy family names and counts.
+        """
+        if not isinstance(paths, list) or len(paths) > MAX_SERVE_PATHS:
+            raise LessonError(f"paths must be a list of at most {MAX_SERVE_PATHS} file paths")
+        ids = [self._soft_id(value, "checked item") for value in _items(checked, "checked")]
+        found = []
+        for item in _items(violations, "violations"):
+            item = _mapping(item, "violations item")
+            if not isinstance(item.get("fixed"), bool):
+                raise LessonError("violations item needs fixed: true or false")
+            clean_text(item.get("note"), "note", MAX_NOTE, required=False)
+            found.append((self._soft_id(item.get("lesson_id"), "violations lesson_id"), item["fixed"]))
+        with _exclusive_lock(self.dir):
+            state = self.load()
+            before = json.dumps(state, sort_keys=True)
+            ignored, credit = [], {}
+
+            def target_of(raw):
+                lesson = _resolve(state, _find(state, raw)) if raw else None
+                if lesson is None or lesson["removed"]:
+                    note = {"lesson_id": raw, "reason": "removed lesson" if lesson else "unknown lesson"}
+                    if note not in ignored:
+                        ignored.append(note)
+                    return None
+                return lesson["id"]
+
+            for raw in ids:
+                target = target_of(raw)
+                if target:
+                    credit.setdefault(target, {"violated": False, "fixed": False})
+            for raw, fixed in found:
+                target = target_of(raw)
+                if target:
+                    flags = credit.setdefault(target, {"violated": False, "fixed": False})
+                    flags["violated"], flags["fixed"] = True, flags["fixed"] or fixed
+            for target, flags in credit.items():
+                lesson = _find(state, target)
+                _bump(lesson, "checked")
+                _bump(lesson, "caught_by_self_check", int(flags["violated"]))
+                _bump(lesson, "fixed", int(flags["fixed"]))
+            if credit:
+                runs = _self_check_totals(state)["runs"]
+                state["self_check"] = {"runs": runs + 1}
+            self._commit(state, before)
+
+            def label(lesson_id):
+                family = rules.family_of(_find(state, lesson_id))
+                return f"{lesson_id} {family if family in rules.FAMILIES else rules.OTHER_FAMILY}"
+
+            fixed_ids = [t for t, f in credit.items() if f["fixed"]]
+            unfixed_ids = [t for t, f in credit.items() if f["violated"] and not f["fixed"]]
+            parts = [f"Checked {len(credit)} rule{'s' if len(credit) != 1 else ''}"]
+            if fixed_ids:
+                parts.append(f"fixed {len(fixed_ids)} ({', '.join(map(label, fixed_ids))})")
+            if unfixed_ids:
+                parts.append(f"left {len(unfixed_ids)} unfixed ({', '.join(map(label, unfixed_ids))})")
+            if credit and not fixed_ids and not unfixed_ids:
+                parts.append("no violations")
+            if ignored:
+                parts.append(f"ignored {len(ignored)} unknown or removed id(s)")
+            summary = ", ".join(parts) + "."
+            return {"ok": True, "repo": self.repo, "summary": summary, "checked": len(credit),
+                    "caught": sum(f["violated"] for f in credit.values()), "fixed": len(fixed_ids),
+                    "unfixed": unfixed_ids, "ignored": ignored, "totals": _self_check_totals(state)}
+
+    @staticmethod
+    def _soft_id(value, field):
+        """A lesson id, or None when it is a string that does not look like one (reported, not fatal)."""
+        if not isinstance(value, str):
+            raise LessonError(f"{field} must be a string like L3")
+        return value if _LESSON_ID_RE.fullmatch(value) else None
 
     def list_candidates(self):
         state = self.load()
@@ -660,6 +795,8 @@ class LessonStore:
                     "rule": check["rule"], "evidence": [_public_evidence(e) for e in check["evidence"]]}
             if target:
                 item["current_rule"] = target["rule"]
+                if _needs_stronger_wording(target):
+                    item["needs_stronger_wording"] = True
             if check["type"] in _RULE_CHECKS:
                 # The principle (general rule) and family are judged together with the specific rule.
                 item["principle"] = check.get("principle") or check["rule"]
@@ -1145,6 +1282,9 @@ class LessonStore:
                     keep["repeats"].append(entry)
                     known.add(entry["pr"])
             keep["manual_active"] = keep["manual_active"] or other["manual_active"]
+            for field, amount in _credit(other).items():
+                _bump(keep, field, amount)
+            other.pop("credit", None)
             other["merged_into"] = keep["id"]
             keep["merged_from"] = sorted({*keep.get("merged_from", []), other["id"], *other.get("merged_from", [])},
                                          key=lambda i: int(i[1:]))
@@ -1270,16 +1410,26 @@ class LessonStore:
                 continue
             lesson["repeats"].append(entry)
             lesson["archived_by_conflict"] = False
+            ai = bool(entry.get("ai_authored"))
+            if ai:
+                _bump(lesson, "ai_misses")
             count = rules.analyze(lesson, _clock(state))["repeat_count"]
             applied = {"lesson_id": lesson["id"], "pr": entry["pr"], "repeat_count": count}
             if family:
                 applied["family"] = family
+            if ai:
+                applied["ai_authored"] = True
             result["repeats_applied"].append(applied)
             if check["phase"] == "backfill":
                 # Old history repeating itself: harden quietly. Alerts are for new PRs only.
                 result["historical_repeats"].append(applied)
                 continue
-            if family:
+            if ai:
+                kind = family or rules.family_of(lesson)
+                label = f" ({rules.FAMILIES[kind]})" if kind in rules.FAMILIES and kind != rules.OTHER_FAMILY else ""
+                message = (f"The AI repeated this kind of mistake{label} in PR #{entry['pr']} despite lesson "
+                           f"{lesson['id']} - you may want to look at it.")
+            elif family:
                 message = (f"This kind of mistake ({rules.FAMILIES[family]}) happened again in PR #{entry['pr']} "
                            f"(related lesson {lesson['id']}) - you may want to look at it.")
             else:
@@ -1288,6 +1438,8 @@ class LessonStore:
             alert = self._alert(state, "repeat", lesson, entry, count, message)
             if family:
                 alert["family"] = family
+            if ai:
+                alert["ai_authored"] = True
             result["alerts"].append(alert)
 
     def _approve_family_repeat(self, state, check, named, result):
@@ -1368,6 +1520,9 @@ class LessonStore:
         family_repeat = item.get("family_repeat", False)
         if not isinstance(family_repeat, bool):
             raise LessonError("family_repeat must be a boolean")
+        ai_authored = item.get("ai_authored", False)
+        if not isinstance(ai_authored, bool):
+            raise LessonError("ai_authored must be a boolean")
         merge_with = item.get("merge_with", [])
         if not isinstance(merge_with, list) or len(merge_with) > MAX_MERGE_LESSONS:
             raise LessonError(f"merge_with must be a list of at most {MAX_MERGE_LESSONS} lesson ids")
@@ -1386,7 +1541,7 @@ class LessonStore:
                "example": example if example and (example["bad"] or example["good"]) else None,
                "principle": clean_text(item.get("principle"), "principle", MAX_RULE, required=False),
                "family": rules.normalise_family(family) if family and family.strip() else None,
-               "family_repeat": family_repeat, "merge_with": [_lesson_id(v, "merge_with item") for v in merge_with],
+               "family_repeat": family_repeat, "ai_authored": ai_authored, "merge_with": [_lesson_id(v, "merge_with item") for v in merge_with],
                "lesson_id": None, "contradicts": None, "url": item.get("url")}
         for field in ("lesson_id", "contradicts"):
             if item.get(field) is not None:
