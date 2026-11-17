@@ -13,9 +13,10 @@ rendered. It is never used as an instruction.
 
 import contextlib
 import difflib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import html
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -36,6 +37,10 @@ MAX_BATCH_ITEMS = 100
 MAX_ITEM_EVIDENCE = 20
 MAX_SERVE_PATHS = 50
 MAX_MERGE_LESSONS = 10
+MAX_PLAN_PRS = 2000
+MAX_CHUNK_SIZE = 50
+MAX_HELPERS = 16
+CLAIM_STALE = timedelta(hours=2)
 EXPORT_START, EXPORT_END = "<!-- pitfall:lessons:start -->", "<!-- pitfall:lessons:end -->"
 
 _OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
@@ -44,6 +49,7 @@ _URL_TAIL_RE = re.compile(r"^[A-Za-z0-9\-._~/#?=&%+:@]+$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 _SNIPPET_CONTROL_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f  ]")
 _LESSON_ID_RE = re.compile(r"L\d{1,6}")
+_CHUNK_ID_RE = re.compile(r"C\d{1,4}")
 _PHASES = ("backfill", "ongoing")
 _WEAK_REASON = "review_comment is weak evidence"
 _VERDICTS = ("approve", "edit", "reject")
@@ -243,6 +249,36 @@ def _migrate_v2(state):
         check.setdefault("family", "")
     state["schema_version"] = SCHEMA_VERSION
     return state
+
+
+# -- parallel backfill plan ----------------------------------------------------
+def _chunk_id(value):
+    if not isinstance(value, str) or not _CHUNK_ID_RE.fullmatch(value):
+        raise LessonError("chunk_id must look like C1")
+    return value
+
+
+def _plan_chunk(state, chunk_id):
+    plan = state.get("backfill_plan")
+    chunk = next((c for c in plan["chunks"] if c["chunk_id"] == chunk_id), None) if plan else None
+    if not chunk:
+        raise LessonError(f"unknown chunk {chunk_id}: no such chunk in the backfill plan (see backfill_progress)")
+    return chunk
+
+
+def _is_stale(chunk):
+    return (chunk["status"] == "claimed"
+            and _parse_time(_now(), "now") - _parse_time(chunk["claimed_at"], "claimed_at") > CLAIM_STALE)
+
+
+def _update_chunk(chunk, known):
+    """Mark a chunk done once all its PRs are processed; otherwise it stays (or becomes) claimed."""
+    missing = [n for n in chunk["prs"] if n not in known]
+    if not missing and chunk["status"] != "done":
+        chunk["status"], chunk["done_at"] = "done", _now()
+    elif missing and chunk["status"] == "open":
+        chunk["status"], chunk["claimed_at"] = "claimed", _now()
+    return {"chunk_id": chunk["chunk_id"], "status": chunk["status"], "missing_prs": missing}
 
 
 def _clock(state):
@@ -762,17 +798,21 @@ class LessonStore:
             return {"repo": self.repo, "alert": alert, "lesson_id": alert["lesson_id"],
                     "lesson_status": rules.analyze(lesson, _clock(state))["status"] if lesson else None}
 
-    def record(self, processed_prs=(), new_lessons=(), repeats=(), backfill_complete=False, observations=()):
+    def record(self, processed_prs=(), new_lessons=(), repeats=(), backfill_complete=False, observations=(),
+               chunk_id=None):
         if not isinstance(backfill_complete, bool):
             raise LessonError("backfill_complete must be a boolean")
+        if chunk_id is not None:
+            chunk_id = _chunk_id(chunk_id)
         prs = [self._check_pr(item) for item in _items(processed_prs, "processed_prs")]
         checked = [self._check_observation(item) for item in _items(observations, "observations")]
         legacy, rejected = self._legacy_observations(_items(new_lessons, "new_lessons"), _items(repeats, "repeats"))
         with _exclusive_lock(self.dir):
-            return self._record_locked(prs, checked + legacy, rejected, backfill_complete)
+            return self._record_locked(prs, checked + legacy, rejected, backfill_complete, chunk_id)
 
-    def _record_locked(self, prs, observations, rejected, backfill_complete):
+    def _record_locked(self, prs, observations, rejected, backfill_complete, chunk_id=None):
         state = self.load()
+        chunk = _plan_chunk(state, chunk_id) if chunk_id else None
         before = json.dumps(state, sort_keys=True)
         result = {"ok": True, "repo": self.repo, "processed_added": [], "processed_skipped": [],
                   "discarded": [], "pending_created": [], "evidence_added": [], "evidence_skipped": [],
@@ -799,9 +839,16 @@ class LessonStore:
         for obs in observations:
             self._apply_observation(state, obs, result)
 
+        if chunk:
+            result["chunk"] = _update_chunk(chunk, known)
+        plan = state.get("backfill_plan")
         if backfill_complete and state["phase"] == "backfill":
-            state["phase"] = "ongoing"
-            state["backfill_completed_at"] = _now()
+            if plan and any(c["status"] != "done" for c in plan["chunks"]):
+                result["backfill_complete_refused"] = ("backfill plan has chunks that are not done; finish them "
+                                                       "(see backfill_progress) before backfill_complete")
+            else:
+                state["phase"] = "ongoing"
+                state["backfill_completed_at"] = _now()
         result["phase"] = state["phase"]
 
         self._commit(state, before)
@@ -813,6 +860,88 @@ class LessonStore:
         result["lessons_path"] = str(self.markdown_path)
         result["tell_user"] = ""
         return result
+
+    # -- parallel backfill (manager plans, helpers claim chunks; the checker and rules stay unchanged) ----
+    def plan_backfill(self, pr_numbers, helpers=4, chunk_size=None, replace=False):
+        """Split the unprocessed old PR numbers into chunks (oldest first) for parallel helpers."""
+        if not isinstance(pr_numbers, list) or len(pr_numbers) > MAX_PLAN_PRS:
+            raise LessonError(f"pr_numbers must be a list of at most {MAX_PLAN_PRS} PR numbers")
+        numbers = pr_numbers
+        numbers = sorted({_positive_int(n, "pr_numbers item") for n in numbers})
+        if isinstance(helpers, bool) or not isinstance(helpers, int) or not 1 <= helpers <= MAX_HELPERS:
+            raise LessonError(f"helpers must be an integer from 1 to {MAX_HELPERS}")
+        if chunk_size is not None and (isinstance(chunk_size, bool) or not isinstance(chunk_size, int)
+                                       or not 1 <= chunk_size <= MAX_CHUNK_SIZE):
+            raise LessonError(f"chunk_size must be an integer from 1 to {MAX_CHUNK_SIZE}")
+        if not isinstance(replace, bool):
+            raise LessonError("replace must be a boolean")
+        with _exclusive_lock(self.dir):
+            state = self.load()
+            before = json.dumps(state, sort_keys=True)
+            old = state.get("backfill_plan")
+            if old and not replace and any(c["status"] != "done" for c in old["chunks"]):
+                raise LessonError(f"plan {old['plan_id']} is not finished; pass replace=true to replace it")
+            known = set(state["processed_numbers"])
+            todo = [n for n in numbers if n not in known]
+            result = {"ok": True, "repo": self.repo, "dropped_processed": [n for n in numbers if n in known]}
+            if not todo:
+                result.update(plan=None, note="Every given PR is already processed; no plan stored.")
+                return result
+            size = chunk_size or min(MAX_CHUNK_SIZE, math.ceil(len(todo) / helpers))
+            plan_number = state.get("next_plan_id", 1)
+            state["next_plan_id"] = plan_number + 1
+            chunks = [{"chunk_id": f"C{i + 1}", "prs": todo[start:start + size], "status": "open",
+                       "claimed_at": None, "done_at": None} for i, start in enumerate(range(0, len(todo), size))]
+            state["backfill_plan"] = {"plan_id": f"P{plan_number}", "created_at": _now(), "chunks": chunks}
+            self._commit(state, before)
+            result.update(plan=state["backfill_plan"], helpers=helpers, chunk_size=size)
+            return result
+
+    def claim_chunk(self, chunk_id=None):
+        """A helper claims a chunk (atomic under the file lock); claims older than 2 hours can be taken over."""
+        if chunk_id is not None:
+            chunk_id = _chunk_id(chunk_id)
+        with _exclusive_lock(self.dir):
+            state = self.load()
+            before = json.dumps(state, sort_keys=True)
+            plan = state.get("backfill_plan")
+            if not plan:
+                raise LessonError("no backfill plan; the manager calls plan_backfill first")
+            if chunk_id:
+                chunk = _plan_chunk(state, chunk_id)
+                if chunk["status"] == "done":
+                    raise LessonError(f"chunk {chunk_id} is already done")
+                if chunk["status"] == "claimed" and not _is_stale(chunk):
+                    raise LessonError(f"chunk {chunk_id} is claimed by another helper (claimed {chunk['claimed_at']})")
+            else:
+                chunk = (next((c for c in plan["chunks"] if c["status"] == "open"), None)
+                         or next((c for c in plan["chunks"] if _is_stale(c)), None))
+                if not chunk:
+                    return {"ok": True, "repo": self.repo, "chunk": None,
+                            "note": "No open chunk left: all are claimed or done (see backfill_progress)."}
+            chunk["status"], chunk["claimed_at"] = "claimed", _now()
+            self._commit(state, before)
+            return {"ok": True, "repo": self.repo, "plan_id": plan["plan_id"], "chunk": chunk,
+                    "next_step": "Read each PR, then record_learning with this chunk_id."}
+
+    def backfill_progress(self):
+        state = self.load()
+        plan = state.get("backfill_plan")
+        pending = len(state["pending"])
+        if not plan:
+            return {"repo": self.repo, "phase": state["phase"], "plan_id": None, "pending_checks": pending,
+                    "ready_for_checker": False}
+        known = set(state["processed_numbers"])
+        chunks = plan["chunks"]
+        counts = {s: sum(1 for c in chunks if c["status"] == s) for s in ("open", "claimed", "done")}
+        done = counts["done"] == len(chunks)
+        return {"repo": self.repo, "phase": state["phase"], "plan_id": plan["plan_id"], "chunks": counts,
+                "stale_claims": [c["chunk_id"] for c in chunks if _is_stale(c)],
+                "prs_total": sum(len(c["prs"]) for c in chunks),
+                "prs_left": sum(1 for c in chunks for n in c["prs"] if n not in known),
+                "pending_checks": pending, "ready_for_checker": done,
+                "next_step": ("All chunks done: run the checker pass, then record_learning(backfill_complete=true)."
+                              if done else "Chunks remain: helpers claim_chunk and record_learning with chunk_id.")}
 
     def submit_checks(self, decisions):
         """Apply the checker's verdicts: only here do proposals, edits, repeats and conflicts take effect."""

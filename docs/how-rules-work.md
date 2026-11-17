@@ -86,9 +86,26 @@ The same mistake can be learned twice in different words. A merge is proposed by
 - **Effect.** The strongest lesson (hardened first, then score) keeps its id. Evidence and repeats of the others move into it (a PR still counts once, the evidence cap of 30 and repeat cap of 200 apply), `manual_active` carries over, the approved principle replaces its principle and its specific rule stays. The others get `merged_into` and `merged_from` records the sources. Merged lessons are never served, are left out of listings (`get_lessons` lists them under `merged`) and `LESSONS.md`, and cannot be approved, removed or merged again. Pending checks, observations that name them, and new lessons with their rule text now count for the surviving lesson.
 
 
+## Parallel backfill
+
+A large backlog of old PRs can be learned by several helpers at once. Delegation is two-level: a **manager** (your host agent) plans and verifies, **helpers** (sub-agents, or the manager itself one chunk at a time if the host has none) read and label, and the usual checker pass and code rules decide what becomes a rule. Helpers never decide rules or approve checks.
+
+1. The manager lists old closed PR numbers with the official GitHub search and calls `plan_backfill(repo, pr_numbers, helpers=4, chunk_size=None, replace=False)`. Code drops processed PRs, sorts the rest oldest first and splits them into chunks: `helpers` is 1 to 16, the chunk size defaults to `ceil(n / helpers)` and is at most 50, at most 2000 PRs per plan. The plan `{plan_id, created_at, chunks: [{chunk_id, prs, status, claimed_at, done_at}]}` is stored in `state.json`. Replacing a plan that still has unfinished chunks needs `replace=True`.
+2. Each helper calls `claim_chunk(repo, chunk_id=None)` for a specific chunk or the next open one. The claim is atomic under the same file lock as every other write, so two helpers never get the same chunk. A claimed chunk older than 2 hours counts as stale and may be claimed again.
+3. The helper reads each PR and calls `record_learning(..., chunk_id=...)`. Observations go through the same discard, pending-check and lifecycle logic as always. The chunk becomes `done` once all its PRs are in the processed set; otherwise it stays `claimed` and the reply lists `missing_prs`.
+4. `backfill_progress(repo)` summarises the plan: chunk counts by state, stale claims, PRs left, pending checks and `ready_for_checker` (every chunk done). The manager then runs the fresh checker pass and finally `record_learning(backfill_complete=True)`, which switches the phase to ongoing. While chunks are unfinished it is refused (`backfill_complete_refused`) and the phase stays backfill.
+
+| Chunk state | Meaning |
+| --- | --- |
+| `open` | not claimed yet |
+| `claimed` | a helper holds it (stale after 2 hours: another helper may take over), or it is only partly recorded |
+| `done` | all its PRs are processed |
+
+Chunks may finish in any order. The cursor is the newest processed PR by creation date and the processed set prevents double counting, so out-of-order chunks give the same cursor and counts as a sequential run. Prompts: `learn_history_parallel` (manager) and `learn_history_chunk` (helper).
+
 ## Server tools, prompts and resources
 
-Server tools (all return JSON): `learning_status(repo)`, `record_learning(repo, processed_prs, observations, backfill_complete=False)` (the older `new_lessons` and `repeats` parameters still work and become observations), `list_pending_checks(repo)`, `submit_checks(repo, decisions)`, `get_relevant_lessons(repo, paths, limit=8, families=None)`, `list_families()`, `propose_merge(repo, lesson_ids, principle, reason)`, `get_lessons(repo)` (full inspection listing with family stats), `list_candidates(repo)`, `approve_lesson(repo, lesson_id)`, `list_alerts(repo)`, `acknowledge_alert(repo, alert_id)`, `resolve_conflict(repo, alert_id, decision)`, `remove_lesson(repo, lesson_id, reason)`. Prompts: `learn_from_prs`, `check_pending_rules`, `check_lessons_before_change`, `find_pr_context`. Resource: `pr-context://lessons/{owner}/{repo}`.
+Server tools (all return JSON): `learning_status(repo)`, `record_learning(repo, processed_prs, observations, backfill_complete=False, chunk_id=None)` (the older `new_lessons` and `repeats` parameters still work and become observations), `list_pending_checks(repo)`, `submit_checks(repo, decisions)`, `get_relevant_lessons(repo, paths, limit=8, families=None)`, `list_families()`, `propose_merge(repo, lesson_ids, principle, reason)`, `plan_backfill(repo, pr_numbers, helpers=4, chunk_size=None, replace=False)`, `claim_chunk(repo, chunk_id=None)`, `backfill_progress(repo)`, `get_lessons(repo)` (full inspection listing with family stats), `list_candidates(repo)`, `approve_lesson(repo, lesson_id)`, `list_alerts(repo)`, `acknowledge_alert(repo, alert_id)`, `resolve_conflict(repo, alert_id, decision)`, `remove_lesson(repo, lesson_id, reason)`. Prompts: `learn_from_prs`, `learn_history_parallel`, `learn_history_chunk`, `check_pending_rules`, `check_lessons_before_change`, `find_pr_context`. Resource: `pr-context://lessons/{owner}/{repo}`.
 
 ## Where lessons live
 
