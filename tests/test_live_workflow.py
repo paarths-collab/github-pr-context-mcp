@@ -55,10 +55,11 @@ def test_live_stdio_prompt_and_resource_without_storage(tmp_path):
                 await session.initialize()
                 tools = {t.name for t in (await session.list_tools()).tools}
                 assert tools == {'learning_status', 'record_learning', 'get_lessons', 'list_alerts',
-                                 'acknowledge_alert', 'remove_lesson'}
+                                 'acknowledge_alert', 'remove_lesson', 'list_pending_checks', 'submit_checks',
+                                 'get_relevant_lessons', 'list_candidates', 'approve_lesson', 'resolve_conflict'}
                 prompts = await session.list_prompts()
                 assert {p.name for p in prompts.prompts} == {
-                    'find_pr_context', 'learn_from_prs', 'check_lessons_before_change'}
+                    'find_pr_context', 'learn_from_prs', 'check_lessons_before_change', 'check_pending_rules'}
                 learn = await session.get_prompt('learn_from_prs', {'repo': 'example/project'})
                 assert 'record_learning' in learn.messages[0].content.text
                 assert 'example/project' in learn.messages[0].content.text
