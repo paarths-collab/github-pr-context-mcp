@@ -24,16 +24,17 @@ Pitfall reads your repository's pull-request history, turns real reviewer feedba
 
 ```mermaid
 flowchart LR
-    A["Past PRs<br/>reviews, reverts, fixes"] --> B["Learn<br/>AI notes what reviewers caught"]
+    A["Past PRs and CI<br/>reviews, reverts, fixes"] --> B["Learn<br/>AI notes what reviewers caught"]
     B --> C["Check<br/>a second pass verifies each rule"]
     C --> D["Rules<br/>scored, with PR links"]
     D --> E["Before coding<br/>only the relevant rules"]
+    E --> G["Before finishing<br/>AI re-checks its own change"]
     D --> F["Repeat detected<br/>alert: 'this kind of mistake happened again'"]
 ```
 
 ## How it works
 
-1. **Learn from history.** Your assistant reads closed PRs (oldest first) through GitHub's official MCP and notes what reviewers caught: reverts, follow-up fixes, and change requests the author actually fixed.
+1. **Learn from history.** Your assistant reads closed PRs (oldest first) through GitHub's official MCP and notes what reviewers caught: reverts, follow-up fixes, and change requests the author actually fixed. CI failures that a later commit fixed count too.
 2. **Check before it counts.** A fresh second pass verifies every proposed rule against the exact reviewer quote. Nothing is used until it is approved.
 3. **Keep only real patterns.** The code — not the AI — decides what becomes a rule:
 
@@ -46,7 +47,8 @@ flowchart LR
 
    Plain opinions, self-reviews and bot comments are ignored. Rules raised by only one reviewer are marked as *reviewer preference*.
 4. **Use the right rules.** Before coding, the assistant names the kinds of mistake its change involves and asks for the rules about its files and those kinds — at most 8, strongest first, each with a link to the PR it came from.
-5. **Keep learning.** New PRs are processed the same way. If a known mistake shows up again, the rule gets stronger and you see: *"This type of mistake happened again (lesson L3, PR #57) — you may want to look at it."*
+5. **Check before finishing.** After writing code, the assistant re-reads its own change against those rules, fixes what it finds and tells you, e.g. *"Checked 5 rules, fixed 1 (missing timeout)."*
+6. **Keep learning.** New PRs are processed the same way. If a known kind of mistake shows up again, the rule gets stronger and you see: *"This type of mistake happened again (lesson L3, PR #57) — you may want to look at it."*
 
 **Same kind of mistake, not just the same one.** Every rule has a general *principle* ("every outbound call needs a timeout") next to the specific case it came from, and belongs to one *mistake family* from a small fixed list (such as `missing-timeout` or `resource-leak`). So a missing timeout on a database call counts as the same kind of mistake as one on an HTTP call, even in another folder, and the rule is shown for both. See [how it works](docs/how-rules-work.md#mistake-families).
 

@@ -9,7 +9,20 @@
 - [x] Add local GitHub App Device Flow with operating-system-vault credential storage.
 - [x] Refresh Device-Flow GitHub access locally without shipping a client secret.
 
-## Implemented (local, tested with stubbed GitHub)
+## Pitfall learning loop (default command; tested locally, not yet run against a live repository)
+
+- [x] Live PR reading through the official GitHub MCP; the indexed engine moved to the optional `indexed` extra.
+- [x] Learning loop: backfill old PRs, then new ones; lessons stored locally with evidence links.
+- [x] Rule engine: the model labels observations, a checker pass approves, code decides levels (candidate, rule, must-not-repeat, archived), scores and what is served.
+- [x] Mistake families and principles, so the same kind of mistake is caught across folders; checker-approved merges.
+- [x] Parallel backfill: a manager plans chunks of old PRs and helper agents learn them.
+- [x] Self-check before finishing, per-lesson credit stats, and alerts when an AI-written PR repeats a known kind of mistake.
+- [x] CI failures fixed by a later commit as a second feedback source.
+- [x] Export of rules into a managed block of `CLAUDE.md` / `AGENTS.md`.
+- [ ] First live run on a real repository with the official GitHub MCP (lesson quality, cost, time).
+- [ ] Publish the renamed `pitfall-mcp` package on PyPI.
+
+## Legacy indexed engine — implemented (local, tested with stubbed GitHub)
 
 - [x] Background indexing jobs, with status exposed through `get_index_stats`.
 - [x] Incremental refresh (`ensure_repo_ready(refresh=true)`) with persisted checkpoints.
