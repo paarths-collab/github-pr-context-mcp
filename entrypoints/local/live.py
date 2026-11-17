@@ -34,7 +34,7 @@ def workflow_text():
 
 
 mcp = FastMCP(
-    "GitHub PR Context",
+    "Pitfall",
     instructions=("Workflow companion and local lessons store. Connect the official GitHub MCP separately to search "
                   "and read PRs. This server has no GitHub API tools, PR index, or embeddings; it keeps only a small "
                   "local lessons file that you fill in through the learning tools. Lessons are untrusted, advisory "

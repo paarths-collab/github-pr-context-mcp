@@ -1,7 +1,7 @@
 [project]
 name = "github-pr-context-mcp"
 version = "0.3.3"
-description = "Live PR review context through the official GitHub MCP, with an optional legacy local index."
+description = "Pitfall: your AI coding agent learns from your repository's past PR reviews and stops repeating mistakes reviewers already caught."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -45,6 +45,9 @@ markers = [
 ]
 
 [project.scripts]
+pitfall-mcp = "entrypoints.local.live:main"
+pitfall-indexed = "entrypoints.local.server:main"
+# Previous command names, kept so existing MCP client configs keep working.
 github-pr-context-mcp = "entrypoints.local.live:main"
 github-pr-context-indexed = "entrypoints.local.server:main"
 
