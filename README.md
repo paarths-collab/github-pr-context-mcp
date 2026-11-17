@@ -1,4 +1,6 @@
-# GitHub PR Context
+# Pitfall
+
+> Formerly *GitHub PR Context*. The package and commands keep their old names until the renamed package is published; `pitfall-mcp` works as a command alias today.
 
 Your agent learns from your repository's past pull requests so it stops repeating mistakes your team already paid for.
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "paarths-collab/github-pr-context-mcp",
-  "title": "GitHub PR Context",
-  "description": "Live PR context workflow companion for the official GitHub MCP; no local index required.",
+  "title": "Pitfall",
+  "description": "Pitfall: your AI coding agent learns from your repository's past PR reviews and stops repeating mistakes reviewers already caught.",
   "version": "0.3.3",
   "repository": {
     "source": "github",
